@@ -19,6 +19,23 @@ export default {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        console: {
+          DEFAULT: "hsl(var(--console))",
+          elevated: "hsl(var(--console-elevated))",
+          sunken: "hsl(var(--console-sunken))",
+          line: "hsl(var(--console-line))",
+          glow: "hsl(var(--console-glow))",
+        },
+        state: {
+          stable: "hsl(var(--state-stable))",
+          stableBg: "hsl(var(--state-stable-bg))",
+          warning: "hsl(var(--state-warning))",
+          warningBg: "hsl(var(--state-warning-bg))",
+          danger: "hsl(var(--state-danger))",
+          dangerBg: "hsl(var(--state-danger-bg))",
+          info: "hsl(var(--state-info))",
+          infoBg: "hsl(var(--state-info-bg))",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
@@ -64,6 +81,15 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       keyframes: {
+        "scan-flow": {
+          "0%": { transform: "translateX(-35%)", opacity: "0.22" },
+          "50%": { opacity: "0.55" },
+          "100%": { transform: "translateX(35%)", opacity: "0.22" },
+        },
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(12px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
         "accordion-down": {
           from: {
             height: "0",
@@ -82,8 +108,19 @@ export default {
         },
       },
       animation: {
+        "scan-flow": "scan-flow 8s ease-in-out infinite alternate",
+        "fade-up": "fade-up 0.5s ease-out both",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+      },
+      boxShadow: {
+        console: "var(--shadow-console)",
+        glow: "var(--shadow-glow)",
+      },
+      backgroundImage: {
+        "console-grid": "var(--gradient-console-grid)",
+        "command-surface": "var(--gradient-command-surface)",
+        "hero-radar": "var(--gradient-hero-radar)",
       },
     },
   },
