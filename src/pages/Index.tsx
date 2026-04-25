@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, BrainCircuit, GitBranch, Play, RefreshCcw, ShieldCheck, Trophy, Waves } from "lucide-react";
+import { Activity, AlertTriangle, BrainCircuit, GitBranch, Play, RefreshCcw, ShieldCheck, Trophy, Waves, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 type AgentState = "idle" | "assigned" | "active" | "waiting" | "blocked" | "escalated" | "completed" | "degraded";
@@ -131,17 +131,17 @@ const Index = () => {
             </div>
             <div className="flex items-center gap-2">
               <Pill tone={eventState}>Event: {eventState}</Pill>
-              <Pill tone={awareness.tarkwaMode}>Tarkwa: {awareness.tarkwaMode.replaceAll("_", " ")}</Pill>
+              <Pill tone={awareness.tarkwaMode}>Tarkwa: {awareness.tarkwaMode.split("_").join(" ")}</Pill>
             </div>
           </nav>
 
           <div className="grid gap-4 md:grid-cols-4">
-            {[
+            {([
               ["Agents", awareness.totals.agents, BrainCircuit],
               ["Open Tasks", awareness.totals.openTasks, Activity],
               ["Blocked Tasks", awareness.totals.blockedTasks, AlertTriangle],
               ["Cascade Blocked", awareness.totals.cascadeBlockedTasks, GitBranch],
-            ].map(([label, value, Icon]) => (
+            ] as Array<[string, number, LucideIcon]>).map(([label, value, Icon]) => (
               <div key={String(label)} className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console transition-transform hover:-translate-y-0.5">
                 <div className="flex items-center justify-between text-muted-foreground"><span className="text-xs font-semibold uppercase tracking-wide">{label}</span><Icon className="h-4 w-4" /></div>
                 <div className="mt-3 text-3xl font-bold">{String(value)}</div>
