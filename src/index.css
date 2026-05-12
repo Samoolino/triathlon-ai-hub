@@ -135,10 +135,37 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: Rajdhani, "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0.01em;
   }
 
-  button, input, select {
+  h1, h2, h3, .font-stencil {
+    font-family: "Black Ops One", "Rajdhani", ui-sans-serif, system-ui;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  code, pre, .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  button, input, select, textarea {
     font: inherit;
   }
+}
+
+@layer utilities {
+  .tac-frame { position: relative; }
+  .tac-frame::before,
+  .tac-frame::after {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-color: hsl(var(--accent));
+    border-style: solid;
+    pointer-events: none;
+  }
+  .tac-frame::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+  .tac-frame::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
 }
