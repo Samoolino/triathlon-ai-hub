@@ -1,835 +1,563 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   BookOpen,
   BrainCircuit,
-  Droplets,
-  FileSpreadsheet,
+  CheckCircle2,
+  ClipboardList,
+  Crosshair,
+  FileUp,
   GitBranch,
   HeartPulse,
   Play,
+  Plus,
+  Radio,
   RefreshCcw,
   ShieldCheck,
-  Stethoscope,
-  ThermometerSun,
   Trophy,
-  Waves,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import {
+  awareness,
+  createEventRuntime,
+  failTaskCascade,
+  runEngineStep,
+  type EventRuntime,
+  type EventSpec,
+} from "@/lib/event-engine";
+import {
+  DOC_CORPUS,
+  MASTER_SECTIONS,
+  TASK_SEEDS,
+  type Discipline,
+  type DistanceBand,
+} from "@/lib/master-playbook";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Redefined Task Execution State Machine
-// queued      → task accepted by Tarkwa, awaiting capability match
-// routing     → Tarkwa scoring agent candidates
-// assigned    → bound to an agent, not yet started
-// awaiting    → blocked on an external signal (sensor, official, athlete)
-// executing   → agent actively performing work
-// validating  → output under peer/guardian validation
-// review      → under ESG/medical/technical delegate review
-// completed   → closed, reputation credited
-// failed      → terminal failure, triggers cascade
-// cascade-blocked → blocked because an upstream dep failed
-// suspended   → manually paused by guardian
-// escalated   → handed up to direct guardian intervention
-// ─────────────────────────────────────────────────────────────────────────────
-type TaskState =
-  | "queued"
-  | "routing"
-  | "assigned"
-  | "awaiting"
-  | "executing"
-  | "validating"
-  | "review"
-  | "completed"
-  | "failed"
-  | "cascade-blocked"
-  | "suspended"
-  | "escalated";
-
-type AgentState = "idle" | "assigned" | "active" | "waiting" | "blocked" | "escalated" | "completed" | "degraded";
-type EventState = "planning" | "pre-live" | "live-normal" | "live-elevated" | "live-critical" | "recovery" | "post-event";
-
-type TaskClass =
-  | "environmental"
-  | "medical"
-  | "anti-doping"
-  | "nutrition"
-  | "course"
-  | "registration"
-  | "results"
-  | "prize-money"
-  | "reporting"
-  | "governance";
-
-type Agent = {
-  id: string;
-  name: string;
-  role: string;
-  cluster: string;
-  capabilities: string[];
-  sources: string[]; // docs that ground this agent
-  state: AgentState;
-  health: "green" | "amber" | "red";
-  workload: number;
-  reputationScore: number;
-  reputationTier: string;
-  completedTaskCount: number;
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const tone = (v?: string) => {
+  const s = String(v || "").toLowerCase();
+  if (s.match(/critical|blocked|failed|red|escalated|destroy/)) return "bg-state-dangerBg text-state-danger border-state-danger/30";
+  if (s.match(/elevated|amber|await|assigned|recovery|review|validating|routing|suspended|warning/)) return "bg-state-warningBg text-state-warning border-state-warning/30";
+  if (s.match(/live|active|executing|green|completed|stable/)) return "bg-state-stableBg text-state-stable border-state-stable/30";
+  return "bg-state-infoBg text-state-info border-state-info/30";
 };
 
-type Task = {
-  id: string;
-  title: string;
-  taskClass: TaskClass;
-  priority: number;
-  requiredCapabilities: string[];
-  assignedAgent?: string;
-  state: TaskState;
-  parentTaskId?: string;
-  dependencyTaskIds?: string[];
-  childTaskIds?: string[];
-  validationTaskId?: string;
-  cascadeBlockedBy?: string;
-  taskType: string;
-  source: string; // grounding document
-  trigger?: string;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Workforce — expanded to match the document corpus
-// ─────────────────────────────────────────────────────────────────────────────
-const initialAgents: Agent[] = [
-  {
-    id: "tarkwa",
-    name: "Tarkwa",
-    role: "Guardian / Assigner AI",
-    cluster: "Command",
-    capabilities: ["orchestration", "risk-scoring", "routing", "escalation"],
-    sources: ["all"],
-    state: "active",
-    health: "green",
-    workload: 0.66,
-    reputationScore: 0.987,
-    reputationTier: "guardian",
-    completedTaskCount: 142,
-  },
-  {
-    id: "wbgt-agent",
-    name: "WBGT Sentinel",
-    role: "Environmental Monitoring Agent",
-    cluster: "Intelligence",
-    capabilities: ["wbgt", "air-temp", "humidity", "water-temp", "wind", "flag-call"],
-    sources: ["Weather_Report_Data_Sheet_2020", "WBGT_index_form"],
-    state: "active",
-    health: "green",
-    workload: 0.58,
-    reputationScore: 0.931,
-    reputationTier: "trusted",
-    completedTaskCount: 41,
-  },
-  {
-    id: "medical-agent",
-    name: "Medical Delegate",
-    role: "Medical Operations Agent",
-    cluster: "Health",
-    capabilities: ["medical-emergency", "triage", "PHE", "cardiac-screening", "delegate-duties"],
-    sources: [
-      "guidelines-for-medical-emergencies",
-      "periodic-health-evaluation-phe",
-      "pre-participation-cardiac-screening",
-      "itu-medical-delegate-roles-responsabilities",
-    ],
-    state: "active",
-    health: "green",
-    workload: 0.71,
-    reputationScore: 0.952,
-    reputationTier: "guardian",
-    completedTaskCount: 58,
-  },
-  {
-    id: "nutrition-agent",
-    name: "Fluid & Nutrition Officer",
-    role: "Athlete Performance Agent",
-    cluster: "Health",
-    capabilities: ["fluid-replacement", "nutrition", "TO-nutrition", "hydration-plan"],
-    sources: ["guidelines-for-fluid-replacement", "technical-officials-nutrition-guidelines"],
-    state: "active",
-    health: "green",
-    workload: 0.44,
-    reputationScore: 0.889,
-    reputationTier: "trusted",
-    completedTaskCount: 33,
-  },
-  {
-    id: "doping-agent",
-    name: "Anti-Doping Steward",
-    role: "Compliance Agent",
-    cluster: "Governance",
-    capabilities: ["anti-doping", "chain-of-custody", "athlete-selection", "audit"],
-    sources: ["medical-and-anti-doping-management"],
-    state: "waiting",
-    health: "amber",
-    workload: 0.39,
-    reputationScore: 0.917,
-    reputationTier: "trusted",
-    completedTaskCount: 24,
-  },
-  {
-    id: "course-agent",
-    name: "Run Course Surveyor",
-    role: "Technical Agent",
-    cluster: "Operations",
-    capabilities: ["course-measurement", "calibration", "signage", "transition-flow"],
-    sources: ["run-course-measurement-manual"],
-    state: "active",
-    health: "green",
-    workload: 0.62,
-    reputationScore: 0.873,
-    reputationTier: "field-ready",
-    completedTaskCount: 19,
-  },
-  {
-    id: "registration-agent",
-    name: "Athlete Registration Bot",
-    role: "Operations Agent",
-    cluster: "Operations",
-    capabilities: ["registration", "form-macro", "data-validation"],
-    sources: ["Registration_Form_Macro_NEW_2024"],
-    state: "active",
-    health: "green",
-    workload: 0.51,
-    reputationScore: 0.842,
-    reputationTier: "verified",
-    completedTaskCount: 27,
-  },
-  {
-    id: "results-agent",
-    name: "Results & Prize Calculator",
-    role: "Reporting Agent",
-    cluster: "Intelligence",
-    capabilities: ["results", "prize-money-formula", "ranking", "publication"],
-    sources: ["worldtriathlon_prize-money-calculation-formula_2022"],
-    state: "idle",
-    health: "green",
-    workload: 0.18,
-    reputationScore: 0.866,
-    reputationTier: "verified",
-    completedTaskCount: 22,
-  },
-  {
-    id: "report-agent",
-    name: "Live Reporting Desk",
-    role: "Reporting Agent",
-    cluster: "Intelligence",
-    capabilities: ["briefing", "public-report", "summaries"],
-    sources: ["all"],
-    state: "idle",
-    health: "green",
-    workload: 0.22,
-    reputationScore: 0.846,
-    reputationTier: "verified",
-    completedTaskCount: 19,
-  },
-];
-
-// Tarkwa-classified, Tarkwa-assigned workforce tasks
-const initialTasks: Task[] = [
-  // ENVIRONMENTAL — WBGT / Weather monitoring loop
-  {
-    id: "T-200",
-    title: "Begin WBGT monitoring 3h pre-start (every 30 min, finish line, 1.5 m, direct sun)",
-    taskClass: "environmental",
-    priority: 0.95,
-    requiredCapabilities: ["wbgt", "air-temp", "humidity"],
-    assignedAgent: "wbgt-agent",
-    state: "executing",
-    taskType: "sensing-loop",
-    childTaskIds: ["T-201", "T-202"],
-    source: "Weather_Report_Data_Sheet_2020 + WBGT_index_form",
-    trigger: "T-3h before start",
-  },
-  {
-    id: "T-201",
-    title: "Classify heat-risk flag (Black/Red/Orange/Yellow/Green) and broadcast",
-    taskClass: "environmental",
-    priority: 0.93,
-    requiredCapabilities: ["flag-call", "risk-scoring"],
-    assignedAgent: "wbgt-agent",
-    state: "validating",
-    parentTaskId: "T-200",
-    dependencyTaskIds: ["T-200"],
-    validationTaskId: "T-203",
-    taskType: "classification",
-    source: "Weather_Report_Data_Sheet_2020 (risk table)",
-  },
-  {
-    id: "T-202",
-    title: "Capture water temperature & wetsuit decision input",
-    taskClass: "environmental",
-    priority: 0.82,
-    requiredCapabilities: ["water-temp"],
-    assignedAgent: "wbgt-agent",
-    state: "executing",
-    parentTaskId: "T-200",
-    dependencyTaskIds: ["T-200"],
-    taskType: "sensing",
-    source: "Weather_Report_Data_Sheet_2020",
-  },
-  {
-    id: "T-203",
-    title: "Medical Delegate co-sign of heat flag & competition continue/cancel call",
-    taskClass: "medical",
-    priority: 0.96,
-    requiredCapabilities: ["delegate-duties", "medical-emergency"],
-    assignedAgent: "medical-agent",
-    state: "review",
-    dependencyTaskIds: ["T-201"],
-    taskType: "review",
-    source: "itu-medical-delegate-roles-responsabilities",
-  },
-
-  // MEDICAL — emergencies, PHE, cardiac
-  {
-    id: "T-210",
-    title: "Verify PHE & pre-participation cardiac screening completion for all entrants",
-    taskClass: "medical",
-    priority: 0.88,
-    requiredCapabilities: ["PHE", "cardiac-screening"],
-    assignedAgent: "medical-agent",
-    state: "executing",
-    taskType: "compliance-check",
-    source: "periodic-health-evaluation-phe + pre-participation-cardiac-screening",
-  },
-  {
-    id: "T-211",
-    title: "Stage medical emergency response (aid stations, AED, evac route)",
-    taskClass: "medical",
-    priority: 0.94,
-    requiredCapabilities: ["medical-emergency", "triage"],
-    assignedAgent: "medical-agent",
-    state: "assigned",
-    dependencyTaskIds: ["T-210"],
-    taskType: "deployment",
-    source: "guidelines-for-medical-emergencies",
-  },
-
-  // NUTRITION / FLUIDS
-  {
-    id: "T-220",
-    title: "Compute athlete fluid replacement plan vs WBGT band",
-    taskClass: "nutrition",
-    priority: 0.78,
-    requiredCapabilities: ["fluid-replacement", "hydration-plan"],
-    assignedAgent: "nutrition-agent",
-    state: "awaiting",
-    dependencyTaskIds: ["T-201"],
-    taskType: "computation",
-    source: "guidelines-for-fluid-replacement",
-    trigger: "awaiting confirmed flag",
-  },
-  {
-    id: "T-221",
-    title: "Brief Technical Officials on nutrition handling at aid stations",
-    taskClass: "nutrition",
-    priority: 0.6,
-    requiredCapabilities: ["TO-nutrition"],
-    assignedAgent: "nutrition-agent",
-    state: "queued",
-    taskType: "briefing",
-    source: "technical-officials-nutrition-guidelines",
-  },
-
-  // ANTI-DOPING
-  {
-    id: "T-230",
-    title: "Select athletes for in-competition testing & open chain-of-custody",
-    taskClass: "anti-doping",
-    priority: 0.84,
-    requiredCapabilities: ["anti-doping", "chain-of-custody"],
-    assignedAgent: "doping-agent",
-    state: "routing",
-    taskType: "selection",
-    source: "medical-and-anti-doping-management",
-  },
-
-  // COURSE
-  {
-    id: "T-240",
-    title: "Re-measure run course per WT manual (calibrated wheel, certified path)",
-    taskClass: "course",
-    priority: 0.86,
-    requiredCapabilities: ["course-measurement", "calibration"],
-    assignedAgent: "course-agent",
-    state: "executing",
-    taskType: "measurement",
-    source: "run-course-measurement-manual",
-  },
-
-  // REGISTRATION
-  {
-    id: "T-250",
-    title: "Ingest 2024 Registration Form macro submissions & validate fields",
-    taskClass: "registration",
-    priority: 0.7,
-    requiredCapabilities: ["registration", "form-macro", "data-validation"],
-    assignedAgent: "registration-agent",
-    state: "executing",
-    childTaskIds: ["T-210"],
-    taskType: "ingest",
-    source: "Registration_Form_Macro_NEW_2024",
-  },
-
-  // RESULTS / PRIZE MONEY
-  {
-    id: "T-260",
-    title: "Compute prize money split (Top 5 / 10 / 15) from official results",
-    taskClass: "prize-money",
-    priority: 0.55,
-    requiredCapabilities: ["prize-money-formula", "results"],
-    assignedAgent: "results-agent",
-    state: "queued",
-    dependencyTaskIds: ["T-203", "T-240"],
-    taskType: "calculation",
-    source: "worldtriathlon_prize-money-calculation-formula_2022",
-    trigger: "post-finish",
-  },
-
-  // REPORTING / GUARDIAN
-  {
-    id: "T-270",
-    title: "Publish Tarkwa guardian awareness snapshot to command channel",
-    taskClass: "reporting",
-    priority: 0.6,
-    requiredCapabilities: ["briefing", "summaries"],
-    assignedAgent: "report-agent",
-    state: "queued",
-    dependencyTaskIds: ["T-203", "T-211", "T-220"],
-    taskType: "reporting",
-    source: "all",
-  },
-];
-
-const eventStates: EventState[] = ["planning", "pre-live", "live-normal", "live-elevated", "live-critical", "recovery", "post-event"];
-
-const taskClassMeta: Record<TaskClass, { label: string; icon: LucideIcon }> = {
-  environmental: { label: "Environmental", icon: ThermometerSun },
-  medical: { label: "Medical", icon: Stethoscope },
-  "anti-doping": { label: "Anti-Doping", icon: ShieldCheck },
-  nutrition: { label: "Nutrition", icon: Droplets },
-  course: { label: "Course", icon: GitBranch },
-  registration: { label: "Registration", icon: FileSpreadsheet },
-  results: { label: "Results", icon: Trophy },
-  "prize-money": { label: "Prize Money", icon: Trophy },
-  reporting: { label: "Reporting", icon: BookOpen },
-  governance: { label: "Governance", icon: ShieldCheck },
-};
-
-function statusTone(value?: string) {
-  const v = String(value || "").toLowerCase();
-  if (v.includes("critical") || v.includes("blocked") || v.includes("failed") || v.includes("red") || v.includes("escalated")) return "bg-state-dangerBg text-state-danger border-state-danger/25";
-  if (v.includes("elevated") || v.includes("amber") || v.includes("waiting") || v.includes("await") || v.includes("assigned") || v.includes("recovery") || v.includes("review") || v.includes("validating") || v.includes("routing") || v.includes("suspended")) return "bg-state-warningBg text-state-warning border-state-warning/25";
-  if (v.includes("live") || v.includes("active") || v.includes("executing") || v.includes("green") || v.includes("completed")) return "bg-state-stableBg text-state-stable border-state-stable/25";
-  return "bg-state-infoBg text-state-info border-state-info/25";
-}
-
-const Pill = ({ children, tone }: { children: React.ReactNode; tone?: string }) => (
-  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(tone || String(children))}`}>{children}</span>
+const Pill = ({ children, t }: { children: React.ReactNode; t?: string }) => (
+  <span className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-[11px] font-mono font-semibold uppercase tracking-wider ${tone(t || String(children))}`}>
+    {children}
+  </span>
 );
 
-const docCorpus = [
-  { id: "wbgt", name: "Weather Report Data Sheet 2020 + WBGT Index Form", kind: "uploaded" },
-  { id: "prize", name: "Prize Money Calculation Formula 2022", kind: "uploaded" },
-  { id: "reg", name: "Registration Form Macro NEW 2024", kind: "uploaded" },
-  { id: "nutrition-to", name: "Technical Officials Nutrition Guidelines", kind: "cms" },
-  { id: "course", name: "Run Course Measurement Manual", kind: "cms" },
-  { id: "med-emerg", name: "Guidelines for Medical Emergencies", kind: "cms" },
-  { id: "fluid", name: "Guidelines for Fluid Replacement", kind: "cms" },
-  { id: "phe", name: "Periodic Health Evaluation (PHE) for Triathletes", kind: "cms" },
-  { id: "cardiac", name: "Pre-participation Cardiac Screening in Athletes", kind: "cms" },
-  { id: "doping", name: "Medical & Anti-Doping Management at WT Events", kind: "cms" },
-  { id: "delegate", name: "ITU Medical Delegate Roles & Responsibilities", kind: "cms" },
+const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
+  <section className={`tac-frame rounded-sm border border-console-line bg-command-surface p-4 shadow-console ${className}`}>
+    {children}
+  </section>
+);
+
+const SectionHeader = ({ icon: Icon, label, desc }: { icon: LucideIcon; label: string; desc?: string }) => (
+  <div className="mb-4">
+    <h2 className="flex items-center gap-2 text-sm font-stencil text-foreground">
+      <Icon className="h-4 w-4 text-accent" /> {label}
+    </h2>
+    {desc && <p className="mt-1 text-xs text-muted-foreground">{desc}</p>}
+  </div>
+);
+
+const inputCls =
+  "w-full rounded-sm border border-input bg-console-sunken px-3 py-2 text-sm font-mono outline-none ring-ring focus:ring-2";
+
+const btnPrimary =
+  "rounded-sm bg-primary px-4 py-2 text-sm font-stencil text-primary-foreground transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-ring";
+const btnSecondary =
+  "rounded-sm border border-console-line bg-console-sunken px-4 py-2 text-sm font-stencil text-foreground transition hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring";
+const btnDanger =
+  "rounded-sm bg-destructive px-4 py-2 text-sm font-stencil text-destructive-foreground transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-ring";
+
+const DISCIPLINES: Discipline[] = [
+  "triathlon", "duathlon", "aquathlon", "aquabike", "cross-tri", "winter-tri", "paratri", "mixed-relay",
 ];
+const DISTANCES: DistanceBand[] = ["super-sprint", "sprint", "standard", "middle", "long"];
+
+// ─── Demo seed event so the console isn't empty ─────────────────────────────
+const demoEvent: EventSpec = {
+  id: "EVT-JABI",
+  name: "Jabi Lake AI-ESG Triathlon",
+  city: "Abuja",
+  country: "Nigeria",
+  startDate: "2026-06-13",
+  disciplines: ["triathlon", "paratri"],
+  distance: "sprint",
+  expectedAthletes: 320,
+  expectedWBGT: 28.4,
+  notes: "Inaugural AI-ESG flagship. Tarkwa serving as guardian assigner.",
+  createdAt: new Date().toISOString(),
+};
 
 const Index = () => {
-  const [agents, setAgents] = useState(initialAgents);
-  const [tasks, setTasks] = useState(initialTasks);
-  const [eventState, setEventState] = useState<EventState>("live-normal");
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [form, setForm] = useState({
-    id: "T-280",
-    title: "Re-evaluate flag if WBGT crosses 30.1°C threshold",
-    taskClass: "environmental" as TaskClass,
-    priority: "0.9",
-    capabilities: "wbgt, flag-call",
+  const [events, setEvents] = useState<Record<string, EventRuntime>>(() => {
+    const rt = createEventRuntime(demoEvent);
+    return { [demoEvent.id]: rt };
   });
-  const [failTaskId, setFailTaskId] = useState("T-201");
-  const [message, setMessage] = useState("Tarkwa initialized. 11 source documents grounded; 8 agents online.");
-  const [classFilter, setClassFilter] = useState<TaskClass | "all">("all");
+  const [activeEventId, setActiveEventId] = useState<string | null>(null);
+  const [view, setView] = useState<"roster" | "intake" | "ops">("roster");
 
-  const awareness = useMemo(() => {
-    const blocked = tasks.filter((t) => t.state === "failed" || t.state === "cascade-blocked").length;
-    const open = tasks.filter((t) => t.state !== "completed").length;
-    const inFlight = tasks.filter((t) => ["executing", "validating", "review"].includes(t.state)).length;
-    const tarkwaMode =
-      eventState === "live-critical" || blocked > 1
-        ? "direct_guardian_intervention"
-        : eventState === "live-elevated" || blocked
-          ? "active_supervision"
-          : "passive_observation";
-    const byClass: Record<string, number> = {};
-    tasks.forEach((t) => {
-      byClass[t.taskClass] = (byClass[t.taskClass] || 0) + 1;
-    });
-    return {
-      eventState,
-      tarkwaMode,
-      totals: {
-        agents: agents.length,
-        openTasks: open,
-        inFlight,
-        blocked,
-        cascadeBlocked: tasks.filter((t) => t.state === "cascade-blocked").length,
-      },
-      classification: byClass,
-      health: blocked ? "amber" : "green",
-      groundedSources: docCorpus.length,
+  // Intake form
+  const [draft, setDraft] = useState({
+    name: "",
+    city: "",
+    country: "",
+    startDate: new Date().toISOString().slice(0, 10),
+    disciplines: ["triathlon"] as Discipline[],
+    distance: "sprint" as DistanceBand,
+    expectedAthletes: "200",
+    expectedWBGT: "26",
+    notes: "",
+    playbookFileName: "",
+    playbookExcerpt: "",
+  });
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const activeRt = activeEventId ? events[activeEventId] : null;
+
+  const submitIntake = () => {
+    const id = `EVT-${Date.now().toString(36).toUpperCase()}`;
+    const spec: EventSpec = {
+      id,
+      name: draft.name.trim() || "Untitled Event",
+      city: draft.city.trim() || "—",
+      country: draft.country.trim() || "—",
+      startDate: draft.startDate,
+      disciplines: draft.disciplines,
+      distance: draft.distance,
+      expectedAthletes: Number(draft.expectedAthletes) || 0,
+      expectedWBGT: Number(draft.expectedWBGT) || undefined,
+      notes: draft.notes,
+      playbookFileName: draft.playbookFileName || undefined,
+      playbookExcerpt: draft.playbookExcerpt || undefined,
+      createdAt: new Date().toISOString(),
     };
-  }, [agents.length, eventState, tasks]);
+    const rt = createEventRuntime(spec);
+    setEvents((cur) => ({ ...cur, [id]: rt }));
+    setActiveEventId(id);
+    setView("ops");
+    setDraft({
+      name: "", city: "", country: "",
+      startDate: new Date().toISOString().slice(0, 10),
+      disciplines: ["triathlon"], distance: "sprint",
+      expectedAthletes: "200", expectedWBGT: "26",
+      notes: "", playbookFileName: "", playbookExcerpt: "",
+    });
+  };
 
-  const leaderboard = useMemo(() => [...agents].sort((a, b) => b.reputationScore - a.reputationScore), [agents]);
-  const visibleTasks = useMemo(
-    () => (classFilter === "all" ? tasks : tasks.filter((t) => t.taskClass === classFilter)),
-    [tasks, classFilter],
+  const onFile = async (file: File | null) => {
+    if (!file) return;
+    const text = await file.text().catch(() => "");
+    setDraft((d) => ({
+      ...d,
+      playbookFileName: file.name,
+      playbookExcerpt: text.slice(0, 600),
+    }));
+  };
+
+  const advance = () => {
+    if (!activeRt) return;
+    setEvents((cur) => ({ ...cur, [activeRt.spec.id]: runEngineStep(cur[activeRt.spec.id]) }));
+  };
+  const failCascade = (taskId: string) => {
+    if (!activeRt) return;
+    setEvents((cur) => ({ ...cur, [activeRt.spec.id]: failTaskCascade(cur[activeRt.spec.id], taskId) }));
+  };
+
+  // ─── HEADER ──────────────────────────────────────────────────────────────
+  const header = (
+    <section className="relative border-b border-console-line bg-console-sunken/80">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px animate-scan-flow bg-hero-radar motion-reduce:animate-none" />
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-4 lg:px-8">
+        <div className="flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-sm border border-accent/40 bg-command-surface shadow-glow">
+            <Crosshair className="h-5 w-5 text-accent" />
+          </div>
+          <div>
+            <p className="text-[11px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Tarkwa · Triathlon AI Workforce</p>
+            <h1 className="text-xl md:text-2xl font-stencil text-foreground">Workforce Operations Command</h1>
+          </div>
+        </div>
+        <nav className="flex items-center gap-2">
+          <button
+            onClick={() => { setView("roster"); setActiveEventId(null); }}
+            className={view === "roster" ? btnPrimary : btnSecondary}
+          >
+            Mission Roster
+          </button>
+          <button onClick={() => { setView("intake"); setActiveEventId(null); }} className={view === "intake" ? btnPrimary : btnSecondary}>
+            <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" /> Initiate Event</span>
+          </button>
+        </nav>
+      </div>
+    </section>
   );
 
-  const createTask = () => {
-    const id = form.id.trim() || `T-${200 + tasks.length}`;
-    const next: Task = {
-      id,
-      title: form.title.trim() || "Untitled workforce task",
-      taskClass: form.taskClass,
-      priority: Number(form.priority) || 0.7,
-      requiredCapabilities: form.capabilities.split(",").map((s) => s.trim()).filter(Boolean),
-      state: "queued",
-      taskType: "tarkwa-assigned",
-      source: "operator-injected",
-    };
-    setTasks((cur) => [next, ...cur]);
-    setMessage(`Tarkwa queued ${id} (class: ${form.taskClass}) for routing.`);
-  };
+  return (
+    <main className="min-h-screen bg-console-grid text-foreground">
+      {header}
+      {view === "roster" && (
+        <RosterView
+          events={Object.values(events)}
+          onOpen={(id) => { setActiveEventId(id); setView("ops"); }}
+          onNew={() => setView("intake")}
+        />
+      )}
+      {view === "intake" && (
+        <IntakeView
+          draft={draft}
+          setDraft={setDraft}
+          onFile={onFile}
+          fileRef={fileRef}
+          submit={submitIntake}
+        />
+      )}
+      {view === "ops" && activeRt && (
+        <OpsView
+          rt={activeRt}
+          onBack={() => { setView("roster"); setActiveEventId(null); }}
+          onAdvance={advance}
+          onFail={failCascade}
+        />
+      )}
+    </main>
+  );
+};
 
-  const failTask = () => {
-    setTasks((cur) =>
-      cur.map((t) => {
-        if (t.id === failTaskId) return { ...t, state: "failed" };
-        if (t.dependencyTaskIds?.includes(failTaskId) || t.parentTaskId === failTaskId)
-          return { ...t, state: "cascade-blocked", cascadeBlockedBy: failTaskId };
-        return t;
-      }),
-    );
-    setAgents((cur) =>
-      cur.map((a) =>
-        a.id === "medical-agent"
-          ? { ...a, state: "blocked", health: "red", workload: 0.93 }
-          : a.id === "tarkwa"
-            ? { ...a, state: "escalated", health: "amber" }
-            : a,
-      ),
-    );
-    setMessage(`Tarkwa: failure cascade from ${failTaskId} → guardian intervention engaged.`);
-  };
+// ─── ROSTER ────────────────────────────────────────────────────────────────
+function RosterView({ events, onOpen, onNew }: { events: EventRuntime[]; onOpen: (id: string) => void; onNew: () => void }) {
+  return (
+    <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+      <div className="mb-5 flex items-end justify-between">
+        <div>
+          <h2 className="font-stencil text-lg">Active Missions</h2>
+          <p className="text-xs text-muted-foreground">Each event is an isolated workforce theatre. Tarkwa orchestrates all of them in parallel.</p>
+        </div>
+        <button onClick={onNew} className={btnPrimary}><span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" /> Initiate New Event</span></button>
+      </div>
 
-  const refreshRuntime = () => setMessage(`Awareness refreshed at ${new Date().toLocaleTimeString()} · mode ${awareness.tarkwaMode}.`);
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {events.map((rt) => {
+          const a = awareness(rt);
+          return (
+            <article key={rt.spec.id} className="tac-frame group cursor-pointer rounded-sm border border-console-line bg-command-surface p-4 shadow-console transition hover:border-accent/60" onClick={() => onOpen(rt.spec.id)}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">OP · {rt.spec.id}</p>
+                  <h3 className="font-stencil text-base">{rt.spec.name}</h3>
+                  <p className="text-xs text-muted-foreground">{rt.spec.city}, {rt.spec.country} · {rt.spec.startDate}</p>
+                </div>
+                <Pill t={rt.state}>{rt.state}</Pill>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <Stat label="Tasks" value={a.totals.tasks} />
+                <Stat label="Done" value={a.totals.completed} />
+                <Stat label="Blocked" value={a.totals.blocked} />
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-sm bg-console-sunken">
+                <div className="h-full bg-state-stable transition-all" style={{ width: `${a.completion}%` }} />
+              </div>
+              <p className="mt-2 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">{a.completion}% executed · {a.tarkwaMode.replace(/_/g, " ")}</p>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="mt-10">
+        <SectionHeader icon={BookOpen} label="Master File · Event Organiser's Manual" desc="ITU/World Triathlon EOM (2019) sections functionally encoded as task seeds." />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {MASTER_SECTIONS.map((s) => {
+            const seedCount = TASK_SEEDS.filter((t) => t.source.includes(s.code) || t.source.toLowerCase().includes(s.id)).length;
+            return (
+              <Card key={s.id}>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-accent">{s.code} · {s.manualRef}</p>
+                <h3 className="mt-1 font-stencil text-sm">{s.label}</h3>
+                <p className="mt-2 text-xs text-muted-foreground">{seedCount || "Linked"} task seeds bound to this section.</p>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-10">
+        <SectionHeader icon={ShieldCheck} label="Grounding Corpus" desc="Documents Tarkwa cites in every routing decision." />
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {DOC_CORPUS.map((d) => (
+            <div key={d.id} className="flex items-center justify-between rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-xs">
+              <span className="font-mono text-muted-foreground">{d.name}</span>
+              <Pill t={d.kind === "master" ? "active" : d.kind === "uploaded" ? "info" : "stable"}>{d.kind}</Pill>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const Stat = ({ label, value }: { label: string; value: number }) => (
+  <div className="rounded-sm border border-console-line bg-console-sunken py-2">
+    <div className="font-stencil text-lg">{value}</div>
+    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+  </div>
+);
+
+// ─── INTAKE ────────────────────────────────────────────────────────────────
+function IntakeView({
+  draft, setDraft, onFile, fileRef, submit,
+}: {
+  draft: any; setDraft: any; onFile: (f: File | null) => void; fileRef: React.RefObject<HTMLInputElement>; submit: () => void;
+}) {
+  const toggleDisc = (d: Discipline) => {
+    setDraft((cur: any) => ({
+      ...cur,
+      disciplines: cur.disciplines.includes(d) ? cur.disciplines.filter((x: Discipline) => x !== d) : [...cur.disciplines, d],
+    }));
+  };
+  return (
+    <div className="mx-auto max-w-5xl px-5 py-6 lg:px-8">
+      <SectionHeader icon={ClipboardList} label="Event Intake · Briefing Packet" desc="Provide event basics or upload an event playbook/brochure. Tarkwa generates the workforce task plan from the master file." />
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Event Name">
+              <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Lagos World Cup" />
+            </Field>
+            <Field label="Start Date">
+              <input type="date" className={inputCls} value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} />
+            </Field>
+            <Field label="City">
+              <input className={inputCls} value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
+            </Field>
+            <Field label="Country">
+              <input className={inputCls} value={draft.country} onChange={(e) => setDraft({ ...draft, country: e.target.value })} />
+            </Field>
+            <Field label="Distance Band">
+              <select className={inputCls} value={draft.distance} onChange={(e) => setDraft({ ...draft, distance: e.target.value })}>
+                {DISTANCES.map((d) => <option key={d}>{d}</option>)}
+              </select>
+            </Field>
+            <Field label="Expected Athletes">
+              <input className={inputCls} type="number" value={draft.expectedAthletes} onChange={(e) => setDraft({ ...draft, expectedAthletes: e.target.value })} />
+            </Field>
+            <Field label="Expected WBGT (°C)">
+              <input className={inputCls} type="number" step="0.1" value={draft.expectedWBGT} onChange={(e) => setDraft({ ...draft, expectedWBGT: e.target.value })} />
+            </Field>
+            <Field label="Disciplines">
+              <div className="flex flex-wrap gap-1.5">
+                {DISCIPLINES.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => toggleDisc(d)}
+                    className={`rounded-sm border px-2 py-1 text-[11px] font-mono uppercase tracking-wider ${draft.disciplines.includes(d) ? "border-accent bg-accent/15 text-accent" : "border-console-line bg-console-sunken text-muted-foreground hover:bg-muted"}`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+          <div className="mt-3">
+            <Field label="Operational Notes">
+              <textarea rows={3} className={inputCls} value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Hot weather profile, paratri considerations, sponsor protocol …" />
+            </Field>
+          </div>
+        </Card>
+
+        <Card>
+          <SectionHeader icon={FileUp} label="Event Playbook / Brochure" desc="Optional. Plain text is parsed for context; PDF/DOCX is registered as an artifact." />
+          <input ref={fileRef} type="file" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} accept=".txt,.md,.csv,.pdf,.docx" />
+          <button className={btnSecondary} onClick={() => fileRef.current?.click()}>
+            <span className="inline-flex items-center gap-2"><FileUp className="h-4 w-4" /> Upload File</span>
+          </button>
+          {draft.playbookFileName && (
+            <div className="mt-3 rounded-sm border border-console-line bg-console-sunken p-2 font-mono text-[11px]">
+              <p className="text-accent">📎 {draft.playbookFileName}</p>
+              {draft.playbookExcerpt && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-muted-foreground">{draft.playbookExcerpt}</pre>}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button onClick={submit} className={btnPrimary}>
+          <span className="inline-flex items-center gap-2"><Play className="h-4 w-4" /> Hand Off to Tarkwa</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <label className="block">
+    <span className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{label}</span>
+    {children}
+  </label>
+);
+
+// ─── OPS WORKSPACE ─────────────────────────────────────────────────────────
+function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: () => void; onAdvance: () => void; onFail: (id: string) => void }) {
+  const a = awareness(rt);
+  const [filter, setFilter] = useState<string>("all");
+
+  const visible = useMemo(
+    () => (filter === "all" ? rt.tasks : rt.tasks.filter((t) => t.taskClass === filter)),
+    [rt.tasks, filter],
+  );
+  const completed = rt.tasks.filter((t) => t.state === "completed");
+  const classes = Array.from(new Set(rt.tasks.map((t) => t.taskClass)));
 
   return (
-    <main className="min-h-screen overflow-hidden bg-console-grid text-foreground">
-      <section className="relative border-b border-console-line bg-console-sunken/70">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px animate-scan-flow bg-hero-radar motion-reduce:animate-none" />
-        <div className="mx-auto flex max-w-7xl flex-col gap-8 px-5 py-6 lg:px-8">
-          <nav className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-lg border border-console-line bg-command-surface shadow-glow">
-                <Waves className="h-5 w-5 text-accent" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground">Jabi Lake AI-ESG Triathlon · Workforce Marketplace</p>
-                <h1 className="text-2xl font-bold tracking-normal md:text-4xl">Tarkwa Workforce Ops Console</h1>
-              </div>
+    <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+      {/* Op header */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <button onClick={onBack} className={btnSecondary}><ArrowLeft className="h-4 w-4" /></button>
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">OP · {rt.spec.id}</p>
+            <h2 className="font-stencil text-xl">{rt.spec.name}</h2>
+            <p className="text-xs text-muted-foreground">{rt.spec.city}, {rt.spec.country} · {rt.spec.startDate} · {rt.spec.distance} · {rt.spec.disciplines.join(", ")}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Pill t={rt.state}>State: {rt.state}</Pill>
+          <Pill t={a.tarkwaMode}>Tarkwa: {a.tarkwaMode.replace(/_/g, " ")}</Pill>
+          <button onClick={onAdvance} className={btnPrimary}><span className="inline-flex items-center gap-2"><RefreshCcw className="h-4 w-4" /> Advance Engine</span></button>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-5">
+        {([
+          ["Agents", a.totals.agents, BrainCircuit],
+          ["Tasks", a.totals.tasks, Activity],
+          ["In-flight", a.totals.inFlight, HeartPulse],
+          ["Completed", a.totals.completed, CheckCircle2],
+          ["Blocked", a.totals.blocked, AlertTriangle],
+        ] as Array<[string, number, LucideIcon]>).map(([l, v, I]) => (
+          <Card key={l}>
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="font-mono text-[10px] uppercase tracking-widest">{l}</span>
+              <I className="h-4 w-4" />
             </div>
-            <div className="flex items-center gap-2">
-              <Pill tone={eventState}>Event: {eventState}</Pill>
-              <Pill tone={awareness.tarkwaMode}>Tarkwa: {awareness.tarkwaMode.split("_").join(" ")}</Pill>
-              <Pill tone="info">Sources grounded: {awareness.groundedSources}</Pill>
+            <div className="mt-2 font-stencil text-2xl">{v}</div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-12">
+        {/* Output / processed flow column */}
+        <Card className="lg:col-span-7">
+          <SectionHeader icon={CheckCircle2} label="Executed Procedure Flow" desc="Personalized output for this event — every completed agent action with grounded source." />
+          {completed.length === 0 ? (
+            <p className="font-mono text-xs text-muted-foreground">No procedures executed yet. Press <span className="text-accent">Advance Engine</span> to run a workforce step.</p>
+          ) : (
+            <ol className="relative space-y-3 border-l-2 border-accent/40 pl-4">
+              {completed.map((t) => (
+                <li key={t.id} className="rounded-sm border border-console-line bg-console-sunken p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[11px] text-accent">{t.id}</span>
+                    <Pill t="completed">completed</Pill>
+                  </div>
+                  <p className="mt-1 text-sm">{t.title}</p>
+                  {t.output && <p className="mt-1 font-mono text-xs text-state-stable">▸ {t.output}</p>}
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t.source}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
+        {/* Awareness + workforce */}
+        <div className="space-y-4 lg:col-span-5">
+          <Card>
+            <SectionHeader icon={Radio} label="Tarkwa Awareness" />
+            <pre className="max-h-64 overflow-auto rounded-sm border border-console-line bg-console-sunken p-3 text-[11px] leading-relaxed text-muted-foreground">
+{JSON.stringify(a, null, 2)}
+            </pre>
+          </Card>
+          <Card>
+            <SectionHeader icon={BrainCircuit} label="Workforce on Theatre" />
+            <div className="grid max-h-[18rem] gap-2 overflow-auto pr-1">
+              {rt.agents.map((ag) => (
+                <div key={ag.id} className="rounded-sm border border-console-line bg-console-sunken p-2">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-sm">{ag.name}</strong>
+                    <Pill t={ag.health}>{ag.health}</Pill>
+                  </div>
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{ag.role} · {ag.cluster}</p>
+                  <p className="mt-1 font-mono text-[11px] text-muted-foreground">Rep {ag.reputationScore.toFixed(3)} · {ag.reputationTier}</p>
+                </div>
+              ))}
             </div>
-          </nav>
-
-          <div className="grid gap-4 md:grid-cols-5">
-            {(
-              [
-                ["Agents", awareness.totals.agents, BrainCircuit],
-                ["Open", awareness.totals.openTasks, Activity],
-                ["In-Flight", awareness.totals.inFlight, HeartPulse],
-                ["Blocked", awareness.totals.blocked, AlertTriangle],
-                ["Cascade", awareness.totals.cascadeBlocked, GitBranch],
-              ] as Array<[string, number, LucideIcon]>
-            ).map(([label, value, Icon]) => (
-              <div
-                key={String(label)}
-                className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console transition-transform hover:-translate-y-0.5"
-              >
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div className="mt-3 text-3xl font-bold">{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-7xl gap-4 px-5 py-5 lg:grid-cols-12 lg:px-8">
-        {/* Tarkwa task creator */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <Play className="h-4 w-4 text-primary" /> Tarkwa · Assign Task
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <input
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-              value={form.id}
-              onChange={(e) => setForm({ ...form, id: e.target.value })}
-              aria-label="Task id"
-            />
-            <select
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-              value={form.taskClass}
-              onChange={(e) => setForm({ ...form, taskClass: e.target.value as TaskClass })}
-              aria-label="Task class"
-            >
-              {Object.entries(taskClassMeta).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-            <input
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2 sm:col-span-2"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              aria-label="Task title"
-            />
-            <input
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-              value={form.priority}
-              onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              aria-label="Priority"
-            />
-            <input
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-              value={form.capabilities}
-              onChange={(e) => setForm({ ...form, capabilities: e.target.value })}
-              aria-label="Capabilities"
-            />
-          </div>
-          <button
-            onClick={createTask}
-            className="mt-4 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            Assign via Tarkwa
-          </button>
+          </Card>
         </div>
 
-        {/* Failure sim */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <AlertTriangle className="h-4 w-4 text-state-warning" /> Failure Simulation
-          </h2>
-          <input
-            className="w-full rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-            value={failTaskId}
-            onChange={(e) => setFailTaskId(e.target.value)}
-            aria-label="Task id to fail"
-          />
-          <button
-            onClick={failTask}
-            className="mt-4 rounded-md bg-destructive px-4 py-2 font-semibold text-destructive-foreground transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            Trigger Failure Cascade
-          </button>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Cascading failure re-routes dependents to <strong>cascade-blocked</strong> and escalates Tarkwa.
-          </p>
-        </div>
-
-        {/* Quick actions */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <RefreshCcw className="h-4 w-4 text-accent" /> Event Mode
-          </h2>
-          <div className="grid gap-3">
-            <select
-              value={eventState}
-              onChange={(e) => setEventState(e.target.value as EventState)}
-              className="rounded-md border border-input bg-console-sunken px-3 py-2 outline-none ring-ring focus:ring-2"
-            >
-              {eventStates.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <button
-              onClick={refreshRuntime}
-              className="rounded-md bg-secondary px-4 py-2 font-semibold text-secondary-foreground transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              Refresh Awareness
-            </button>
-            <button
-              onClick={() => setAutoRefresh((v) => !v)}
-              className="rounded-md border border-console-line bg-console-sunken px-4 py-2 font-semibold transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              Auto Refresh: {autoRefresh ? "ON" : "OFF"}
-            </button>
-          </div>
-        </div>
-
-        {/* Awareness */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 text-lg font-semibold">Tarkwa Awareness</h2>
-          <pre className="max-h-80 overflow-auto rounded-md border border-console-line bg-console-sunken p-3 text-xs leading-relaxed text-muted-foreground">
-            {JSON.stringify(awareness, null, 2)}
-          </pre>
-          <p className="mt-3 text-sm text-muted-foreground">{message}</p>
-        </div>
-
-        {/* Leaderboard */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <Trophy className="h-4 w-4 text-state-warning" /> Agent Reputation
-          </h2>
-          <div className="grid max-h-[28rem] gap-3 overflow-auto pr-1">
-            {leaderboard.map((a, i) => (
-              <article key={a.id} className="rounded-lg border border-console-line bg-console-sunken p-3 transition-colors hover:border-console-glow/60">
-                <div className="flex items-start justify-between gap-2">
-                  <strong>
-                    #{i + 1} {a.name}
-                  </strong>
-                  <Pill tone={a.health}>{a.health}</Pill>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {a.role} · {a.cluster}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Rep {a.reputationScore.toFixed(3)} · {a.reputationTier} · Load {Math.round(a.workload * 100)}%
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">Caps: {a.capabilities.join(", ")}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        {/* Document corpus */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-4">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <BookOpen className="h-4 w-4 text-accent" /> Grounding Corpus
-          </h2>
-          <div className="grid max-h-[28rem] gap-2 overflow-auto pr-1">
-            {docCorpus.map((d) => (
-              <div key={d.id} className="flex items-start justify-between gap-2 rounded-md border border-console-line bg-console-sunken p-2 text-xs">
-                <span className="text-muted-foreground">{d.name}</span>
-                <Pill tone={d.kind === "uploaded" ? "info" : "active"}>{d.kind}</Pill>
-              </div>
-            ))}
-            <p className="mt-2 text-xs text-muted-foreground">
-              Note: Google Drive source <code>11xmwXxG…</code> is restricted to the <code>triathlon.org</code> workspace and could not be ingested anonymously. Share publicly or upload to grant Tarkwa access.
-            </p>
-          </div>
-        </div>
-
-        {/* Tasks (with class filter) */}
-        <div className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-12">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <ShieldCheck className="h-4 w-4 text-state-stable" /> Workforce Tasks · Tarkwa-classified
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setClassFilter("all")}
-                className={`rounded-full border px-3 py-1 text-xs ${classFilter === "all" ? "border-primary bg-primary/10 text-primary" : "border-console-line bg-console-sunken text-muted-foreground hover:bg-muted"}`}
-              >
-                all
-              </button>
-              {Object.entries(taskClassMeta).map(([k, v]) => (
-                <button
-                  key={k}
-                  onClick={() => setClassFilter(k as TaskClass)}
-                  className={`rounded-full border px-3 py-1 text-xs ${classFilter === k ? "border-primary bg-primary/10 text-primary" : "border-console-line bg-console-sunken text-muted-foreground hover:bg-muted"}`}
-                >
-                  {v.label}
-                </button>
+        {/* Task board with filters */}
+        <Card className="lg:col-span-12">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <SectionHeader icon={ShieldCheck} label="Task Board · Tarkwa-classified" />
+            <div className="flex flex-wrap gap-1.5">
+              <FilterBtn active={filter === "all"} onClick={() => setFilter("all")}>all</FilterBtn>
+              {classes.map((c) => (
+                <FilterBtn key={c} active={filter === c} onClick={() => setFilter(c)}>{c}</FilterBtn>
               ))}
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {visibleTasks.map((t) => {
-              const Icon = taskClassMeta[t.taskClass].icon;
-              return (
-                <article key={t.id} className="rounded-lg border border-console-line bg-console-sunken p-3 animate-fade-up transition-colors hover:border-console-glow/60">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4 text-accent" />
-                      <strong className="text-sm">{t.id}</strong>
-                    </div>
-                    <Pill tone={t.state}>{t.state}</Pill>
-                  </div>
-                  <p className="mt-2 text-sm">{t.title}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Class: <strong className="text-foreground">{taskClassMeta[t.taskClass].label}</strong> · Type: {t.taskType} · Priority {t.priority}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">Agent: {t.assignedAgent || "unassigned"}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Caps: {t.requiredCapabilities.join(", ")}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Deps: {t.dependencyTaskIds?.join(", ") || "—"} · Children: {t.childTaskIds?.join(", ") || "—"}
-                  </p>
-                  {t.cascadeBlockedBy && (
-                    <p className="mt-1 text-xs text-state-danger">Cascade-blocked by {t.cascadeBlockedBy}</p>
+            {visible.map((t) => (
+              <article key={t.id} className="rounded-sm border border-console-line bg-console-sunken p-3 animate-fade-up">
+                <div className="flex items-center justify-between">
+                  <strong className="font-mono text-xs text-accent">{t.id}</strong>
+                  <Pill t={t.state}>{t.state}</Pill>
+                </div>
+                <p className="mt-1 text-sm">{t.title}</p>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {t.taskClass} · {t.taskType} · prio {t.priority}
+                </p>
+                <p className="mt-1 font-mono text-[11px] text-muted-foreground">Agent: {t.assignedAgent || "—"}</p>
+                {t.dependencyTaskIds?.length ? (
+                  <p className="mt-1 font-mono text-[11px] text-muted-foreground">Deps: {t.dependencyTaskIds.join(", ")}</p>
+                ) : null}
+                {t.cascadeBlockedBy && <p className="mt-1 font-mono text-[11px] text-state-danger">⚠ cascade-blocked by {t.cascadeBlockedBy}</p>}
+                <div className="mt-2 flex items-center justify-between border-t border-console-line pt-2">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t.source}</span>
+                  {t.state !== "completed" && t.state !== "failed" && (
+                    <button onClick={() => onFail(t.id)} className="font-mono text-[10px] uppercase text-state-danger hover:underline">Fail</button>
                   )}
-                  <p className="mt-2 border-t border-console-line pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Source · {t.source}
-                  </p>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Execution state legend */}
-        <section className="rounded-lg border border-console-line bg-command-surface p-4 shadow-console lg:col-span-12">
-          <h2 className="mb-3 text-lg font-semibold">Redefined Task Execution States</h2>
-          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-            {[
-              ["queued", "Accepted by Tarkwa, awaiting capability match"],
-              ["routing", "Tarkwa scoring agent candidates"],
-              ["assigned", "Bound to an agent, not yet started"],
-              ["awaiting", "Blocked on external signal (sensor/official/athlete)"],
-              ["executing", "Agent actively performing work"],
-              ["validating", "Output under peer/guardian validation"],
-              ["review", "Under ESG / Medical / Technical Delegate review"],
-              ["completed", "Closed; reputation credited"],
-              ["failed", "Terminal failure → triggers cascade"],
-              ["cascade-blocked", "Blocked by upstream dependency failure"],
-              ["suspended", "Manually paused by guardian"],
-              ["escalated", "Direct guardian intervention engaged"],
-            ].map(([state, desc]) => (
-              <div key={state} className="flex items-start gap-2 rounded-md border border-console-line bg-console-sunken p-2">
-                <Pill tone={state}>{state}</Pill>
-                <span className="flex-1">{desc}</span>
-              </div>
+                </div>
+              </article>
             ))}
           </div>
-        </section>
-      </section>
-    </main>
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <SectionHeader icon={BookOpen} label="Engine Log" />
+          <div className="max-h-48 space-y-1 overflow-auto font-mono text-[11px] text-muted-foreground">
+            {rt.log.slice().reverse().map((l, i) => (
+              <div key={i}>[{l.ts.slice(11, 19)}] {l.msg}</div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
   );
-};
+}
+
+const FilterBtn = ({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) => (
+  <button
+    onClick={onClick}
+    className={`rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${active ? "border-accent bg-accent/15 text-accent" : "border-console-line bg-console-sunken text-muted-foreground hover:bg-muted"}`}
+  >
+    {children}
+  </button>
+);
 
 export default Index;
