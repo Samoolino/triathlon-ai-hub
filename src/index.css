@@ -1,61 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Black+Ops+One&family=JetBrains+Mono:wght@400;600&family=Rajdhani:wght@500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Tarkwa Workforce — Military / Tactical Operations theme.
+   All colors are HSL. Tokens drive every surface; never hard-code colors. */
 
 @layer base {
   :root {
-    --background: 221 54% 8%;
-    --foreground: 210 40% 96%;
+    /* Olive drab command bunker */
+    --background: 80 14% 7%;
+    --foreground: 50 30% 90%;
 
-    --card: 221 45% 12%;
-    --card-foreground: 210 40% 96%;
+    --card: 80 16% 11%;
+    --card-foreground: 50 30% 92%;
 
-    --popover: 221 45% 12%;
-    --popover-foreground: 210 40% 96%;
+    --popover: 80 16% 11%;
+    --popover-foreground: 50 30% 92%;
 
-    --primary: 216 87% 58%;
-    --primary-foreground: 210 40% 98%;
+    /* Olive drab #6B7C3A-ish */
+    --primary: 78 38% 38%;
+    --primary-foreground: 50 30% 95%;
 
-    --secondary: 263 72% 58%;
-    --secondary-foreground: 210 40% 98%;
+    /* Coyote tan */
+    --secondary: 35 35% 45%;
+    --secondary-foreground: 50 30% 95%;
 
-    --muted: 218 32% 18%;
-    --muted-foreground: 215 20% 68%;
+    --muted: 80 12% 16%;
+    --muted-foreground: 50 14% 68%;
 
-    --accent: 174 68% 42%;
-    --accent-foreground: 210 40% 98%;
+    /* Brass / amber accent */
+    --accent: 42 80% 52%;
+    --accent-foreground: 80 30% 10%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    /* Signal red */
+    --destructive: 6 75% 48%;
+    --destructive-foreground: 50 30% 95%;
 
-    --border: 216 28% 25%;
-    --input: 216 28% 25%;
-    --ring: 216 87% 58%;
+    --border: 75 20% 22%;
+    --input: 75 20% 22%;
+    --ring: 78 50% 45%;
 
-    --radius: 0.5rem;
+    --radius: 0.25rem;
 
-    --console: 221 54% 8%;
-    --console-elevated: 221 45% 12%;
-    --console-sunken: 222 61% 6%;
-    --console-line: 216 28% 25%;
-    --console-glow: 190 95% 58%;
-    --state-stable: 142 69% 64%;
-    --state-stable-bg: 142 72% 23%;
-    --state-warning: 43 96% 64%;
-    --state-warning-bg: 35 91% 25%;
-    --state-danger: 0 91% 75%;
-    --state-danger-bg: 0 72% 28%;
-    --state-info: 213 94% 78%;
-    --state-info-bg: 218 78% 30%;
-    --gradient-console-grid: radial-gradient(circle at 20% 15%, hsl(var(--primary) / 0.20), transparent 28%), radial-gradient(circle at 78% 18%, hsl(var(--accent) / 0.16), transparent 25%), linear-gradient(135deg, hsl(var(--background)), hsl(var(--console-sunken)) 65%);
+    /* Console / tactical surfaces */
+    --console: 80 14% 7%;
+    --console-elevated: 80 16% 11%;
+    --console-sunken: 80 18% 5%;
+    --console-line: 75 22% 22%;
+    --console-glow: 90 70% 50%;     /* night-vision green */
+
+    /* State chips */
+    --state-stable: 90 65% 50%;     /* NV green */
+    --state-stable-bg: 90 60% 14%;
+    --state-warning: 42 92% 55%;    /* amber */
+    --state-warning-bg: 38 70% 16%;
+    --state-danger: 6 80% 58%;      /* signal red */
+    --state-danger-bg: 6 60% 18%;
+    --state-info: 200 35% 65%;      /* steel */
+    --state-info-bg: 210 30% 16%;
+
+    /* Tactical chrome */
+    --gradient-console-grid:
+      linear-gradient(hsl(var(--console-line) / 0.18) 1px, transparent 1px) 0 0/32px 32px,
+      linear-gradient(90deg, hsl(var(--console-line) / 0.18) 1px, transparent 1px) 0 0/32px 32px,
+      radial-gradient(circle at 20% 15%, hsl(var(--primary) / 0.22), transparent 32%),
+      radial-gradient(circle at 80% 20%, hsl(var(--accent) / 0.10), transparent 28%),
+      linear-gradient(135deg, hsl(var(--background)), hsl(var(--console-sunken)) 65%);
     --gradient-command-surface: linear-gradient(180deg, hsl(var(--card) / 0.94), hsl(var(--console-elevated) / 0.80));
     --gradient-hero-radar: linear-gradient(90deg, transparent, hsl(var(--console-glow) / 0.35), transparent);
-    --shadow-console: 0 18px 60px -34px hsl(var(--console-glow) / 0.70);
-    --shadow-glow: 0 0 0 1px hsl(var(--console-glow) / 0.12), 0 20px 80px -44px hsl(var(--console-glow) / 0.85);
+    --shadow-console: 0 18px 60px -34px hsl(var(--console-glow) / 0.55);
+    --shadow-glow: 0 0 0 1px hsl(var(--console-glow) / 0.14), 0 20px 80px -44px hsl(var(--console-glow) / 0.65);
 
     --sidebar-background: 0 0% 98%;
 
