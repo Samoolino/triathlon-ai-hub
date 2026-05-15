@@ -26,24 +26,22 @@ export default function GriProductMatrix() {
             </tr>
           </thead>
           <tbody>
-            {PRODUCT_MATRIX.map((s) => (
-              <>
-                <tr key={s.title} className="border-t border-console-line bg-background/50">
-                  <td colSpan={5} className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent">
-                    {s.title}
-                  </td>
+            {PRODUCT_MATRIX.flatMap((s) => [
+              <tr key={s.title + "_h"} className="border-t border-console-line bg-background/50">
+                <td colSpan={5} className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent">
+                  {s.title}
+                </td>
+              </tr>,
+              ...s.rows.map((r, i) => (
+                <tr key={s.title + i} className="border-t border-console-line/60 align-top">
+                  <td className="px-3 py-2 text-foreground">{r.component}</td>
+                  <td className="px-3 py-2"><span className={badge}>{r.gri}</span></td>
+                  <td className="px-3 py-2"><span className={badge}>{r.esrs}</span></td>
+                  <td className="px-3 py-2 text-muted-foreground">{r.output}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{r.product}</td>
                 </tr>
-                {s.rows.map((r, i) => (
-                  <tr key={s.title + i} className="border-t border-console-line/60 align-top">
-                    <td className="px-3 py-2 text-foreground">{r.component}</td>
-                    <td className="px-3 py-2"><span className={badge}>{r.gri}</span></td>
-                    <td className="px-3 py-2"><span className={badge}>{r.esrs}</span></td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.output}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.product}</td>
-                  </tr>
-                ))}
-              </>
-            ))}
+              )),
+            ])}
           </tbody>
         </table>
       </div>
