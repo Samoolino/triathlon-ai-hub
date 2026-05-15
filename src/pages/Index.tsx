@@ -34,6 +34,8 @@ import {
   type Discipline,
   type DistanceBand,
 } from "@/lib/master-playbook";
+import GriAnalytics from "@/components/GriAnalytics";
+import GriProductMatrix from "@/components/GriProductMatrix";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
@@ -536,6 +538,14 @@ function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: 
               </article>
             ))}
           </div>
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <GriAnalytics rt={rt} />
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <GriProductMatrix />
         </Card>
 
         <Card className="lg:col-span-12">
