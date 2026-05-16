@@ -36,6 +36,7 @@ import {
 } from "@/lib/master-playbook";
 import GriAnalytics from "@/components/GriAnalytics";
 import GriProductMatrix from "@/components/GriProductMatrix";
+import BusinessDevelopment from "@/components/BusinessDevelopment";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
@@ -538,6 +539,10 @@ function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: 
               </article>
             ))}
           </div>
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <BusinessDevelopment rt={rt} />
         </Card>
 
         <Card className="lg:col-span-12">
