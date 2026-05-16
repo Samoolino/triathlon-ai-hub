@@ -36,6 +36,7 @@ import {
 } from "@/lib/master-playbook";
 import GriAnalytics from "@/components/GriAnalytics";
 import GriProductMatrix from "@/components/GriProductMatrix";
+import BusinessDevelopment from "@/components/BusinessDevelopment";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
