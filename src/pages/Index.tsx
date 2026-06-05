@@ -37,6 +37,7 @@ import {
 import GriAnalytics from "@/components/GriAnalytics";
 import GriProductMatrix from "@/components/GriProductMatrix";
 import BusinessDevelopment from "@/components/BusinessDevelopment";
+import CommandCenter from "@/components/CommandCenter";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
@@ -539,6 +540,10 @@ function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: 
               </article>
             ))}
           </div>
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <CommandCenter rt={rt} />
         </Card>
 
         <Card className="lg:col-span-12">
