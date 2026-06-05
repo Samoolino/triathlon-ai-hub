@@ -543,6 +543,10 @@ function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: 
         </Card>
 
         <Card className="lg:col-span-12">
+          <CommandCenter rt={rt} />
+        </Card>
+
+        <Card className="lg:col-span-12">
           <BusinessDevelopment rt={rt} />
         </Card>
 
