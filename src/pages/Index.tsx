@@ -38,6 +38,7 @@ import GriAnalytics from "@/components/GriAnalytics";
 import GriProductMatrix from "@/components/GriProductMatrix";
 import BusinessDevelopment from "@/components/BusinessDevelopment";
 import CommandCenter from "@/components/CommandCenter";
+import ExecutiveCommand from "@/components/ExecutiveCommand";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
