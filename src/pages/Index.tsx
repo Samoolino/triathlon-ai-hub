@@ -38,6 +38,7 @@ import GriAnalytics from "@/components/GriAnalytics";
 import GriProductMatrix from "@/components/GriProductMatrix";
 import BusinessDevelopment from "@/components/BusinessDevelopment";
 import CommandCenter from "@/components/CommandCenter";
+import ExecutiveCommand from "@/components/ExecutiveCommand";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const tone = (v?: string) => {
@@ -105,7 +106,7 @@ const Index = () => {
     return { [demoEvent.id]: rt };
   });
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
-  const [view, setView] = useState<"roster" | "intake" | "ops">("roster");
+  const [view, setView] = useState<"roster" | "intake" | "ops" | "executive">("roster");
 
   // Intake form
   const [draft, setDraft] = useState({
@@ -195,6 +196,9 @@ const Index = () => {
           >
             Mission Roster
           </button>
+          <button onClick={() => { setView("executive"); setActiveEventId(null); }} className={view === "executive" ? btnPrimary : btnSecondary}>
+            <span className="inline-flex items-center gap-2"><BrainCircuit className="h-4 w-4" /> Executive Command</span>
+          </button>
           <button onClick={() => { setView("intake"); setActiveEventId(null); }} className={view === "intake" ? btnPrimary : btnSecondary}>
             <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" /> Initiate Event</span>
           </button>
@@ -229,6 +233,11 @@ const Index = () => {
           onAdvance={advance}
           onFail={failCascade}
         />
+      )}
+      {view === "executive" && (
+        <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+          <ExecutiveCommand rt={null} />
+        </div>
       )}
     </main>
   );
@@ -540,6 +549,10 @@ function OpsView({ rt, onBack, onAdvance, onFail }: { rt: EventRuntime; onBack: 
               </article>
             ))}
           </div>
+        </Card>
+
+        <Card className="lg:col-span-12">
+          <ExecutiveCommand rt={rt} />
         </Card>
 
         <Card className="lg:col-span-12">
