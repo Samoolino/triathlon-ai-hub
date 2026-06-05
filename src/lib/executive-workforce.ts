@@ -166,23 +166,20 @@ export function executeX402(
 ): { wallet: WalletState; outcome: WalletTx } {
   const ts = new Date().toISOString();
   const id = `TX-${ts.slice(11, 19).replace(/:/g, "")}`;
-  // infinite loop protection
+  const base = { id, ts, endpoint: req.endpoint, asset: req.asset, amount: req.priceUSDC, agent: req.agent };
   if (w.consecutive402 >= 2) {
-    const tx: WalletTx = { id, ts, ...req, status: "rejected", note: "abort: 2 consecutive 402s" };
+    const tx: WalletTx = { ...base, status: "rejected", note: "abort: 2 consecutive 402s" };
     return { wallet: { ...w, history: [tx, ...w.history], consecutive402: 0 }, outcome: tx };
   }
-  // daily cap
   if (w.spentTodayUSDC + req.priceUSDC > w.dailyCapUSDC) {
-    const tx: WalletTx = { id, ts, ...req, status: "rejected", note: "daily cap exceeded" };
+    const tx: WalletTx = { ...base, status: "rejected", note: "daily cap exceeded" };
     return { wallet: { ...w, history: [tx, ...w.history] }, outcome: tx };
   }
-  // high-value approval
   if (req.priceUSDC > w.highValueThreshold && !humanApproved) {
-    const tx: WalletTx = { id, ts, ...req, status: "approval-required", note: `>${w.highValueThreshold} USDC` };
+    const tx: WalletTx = { ...base, status: "approval-required", note: `>${w.highValueThreshold} USDC` };
     return { wallet: { ...w, history: [tx, ...w.history] }, outcome: tx };
   }
-  // settle
-  const tx: WalletTx = { id, ts, ...req, status: "settled" };
+  const tx: WalletTx = { ...base, status: "settled", note: req.note };
   return {
     wallet: {
       ...w,
