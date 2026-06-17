@@ -4,6 +4,8 @@ import { useAuth } from "@/hooks/useAuth";
 import Index from "./Index";
 import AgentChat from "@/components/AgentChat";
 import NarrativeFeed from "@/components/NarrativeFeed";
+import SocialStudio from "@/components/SocialStudio";
+import GriComposer from "@/components/GriComposer";
 
 export default function CommandLayout() {
   const { user, isAdmin, signOut } = useAuth();
@@ -28,12 +30,18 @@ export default function CommandLayout() {
 
       <Index />
 
-      <section className="mx-auto max-w-7xl px-4 pb-12">
+      <section className="mx-auto max-w-7xl px-4 pb-8">
         <div className="grid gap-4 lg:grid-cols-2">
           <NarrativeFeed />
           <AgentChat />
         </div>
       </section>
+
+      <section className="mx-auto max-w-7xl px-4 pb-8">
+        <GriComposer />
+      </section>
+
+      <SocialStudio />
     </div>
   );
 }

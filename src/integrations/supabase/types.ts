@@ -53,6 +53,60 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_requests: {
+        Row: {
+          assignee_email: string | null
+          created_at: string
+          id: string
+          kind: string
+          payload: Json
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          assignee_email?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          payload?: Json
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          assignee_email?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      allowed_emails: {
+        Row: {
+          created_at: string
+          email: string
+          invited_by: string | null
+          note: string | null
+          role: Database["public"]["Enums"]["app_role"]
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          invited_by?: string | null
+          note?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          invited_by?: string | null
+          note?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+        }
+        Relationships: []
+      }
       events_log: {
         Row: {
           created_at: string
@@ -74,6 +128,108 @@ export type Database = {
           id?: string
           kind?: string
           payload?: Json
+        }
+        Relationships: []
+      }
+      gri_disclosures: {
+        Row: {
+          citations: string[]
+          created_at: string
+          disclosure_type: string
+          event_code: string
+          gri_code: string
+          id: string
+          narrative: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+          value: Json
+        }
+        Insert: {
+          citations?: string[]
+          created_at?: string
+          disclosure_type?: string
+          event_code: string
+          gri_code: string
+          id?: string
+          narrative?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
+        }
+        Update: {
+          citations?: string[]
+          created_at?: string
+          disclosure_type?: string
+          event_code?: string
+          gri_code?: string
+          id?: string
+          narrative?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
+        }
+        Relationships: []
+      }
+      gri_external_facts: {
+        Row: {
+          fetched_at: string
+          key: string
+          payload: Json
+          source: string
+        }
+        Insert: {
+          fetched_at?: string
+          key: string
+          payload: Json
+          source: string
+        }
+        Update: {
+          fetched_at?: string
+          key?: string
+          payload?: Json
+          source?: string
+        }
+        Relationships: []
+      }
+      media_jobs: {
+        Row: {
+          aspect_ratio: string | null
+          created_at: string
+          created_by: string | null
+          error: string | null
+          id: string
+          kind: string
+          prompt: string
+          result_url: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          aspect_ratio?: string | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          kind: string
+          prompt: string
+          result_url?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          aspect_ratio?: string | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          kind?: string
+          prompt?: string
+          result_url?: string | null
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -136,6 +292,101 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      social_accounts: {
+        Row: {
+          connection_id: string | null
+          created_at: string
+          event_code: string | null
+          handle: string | null
+          id: string
+          platform: string
+          requested_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id?: string | null
+          created_at?: string
+          event_code?: string | null
+          handle?: string | null
+          id?: string
+          platform: string
+          requested_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string | null
+          created_at?: string
+          event_code?: string | null
+          handle?: string | null
+          id?: string
+          platform?: string
+          requested_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      social_posts: {
+        Row: {
+          account_id: string | null
+          approval_state: string
+          caption: string | null
+          created_at: string
+          created_by: string | null
+          event_code: string
+          generated_media_url: string | null
+          id: string
+          kind: string
+          prompt: string | null
+          remote_url: string | null
+          scheduled_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          account_id?: string | null
+          approval_state?: string
+          caption?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_code: string
+          generated_media_url?: string | null
+          id?: string
+          kind?: string
+          prompt?: string | null
+          remote_url?: string | null
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          account_id?: string | null
+          approval_state?: string
+          caption?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_code?: string
+          generated_media_url?: string | null
+          id?: string
+          kind?: string
+          prompt?: string | null
+          remote_url?: string | null
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_posts_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
