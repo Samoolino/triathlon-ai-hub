@@ -23,8 +23,16 @@ export default function AuthPage() {
     e.preventDefault();
     setBusy(true);
     try {
+      const target = email.trim().toLowerCase();
+      // Pre-check allowlist for friendly UX (trigger is source of truth)
+      const { data: allow } = await supabase.from("allowed_emails").select("email").eq("email", target).maybeSingle();
+      if (!allow && target !== "esgsportrive@gmail.com") {
+        toast.error("Email not on the access list. Ask the admin to add you.");
+        setBusy(false);
+        return;
+      }
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
+        email: target,
         options: { emailRedirectTo: `${window.location.origin}/command`, shouldCreateUser: true },
       });
       if (error) throw error;
@@ -32,7 +40,7 @@ export default function AuthPage() {
       toast.success("Sign-in link sent. Check your inbox.");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed";
-      toast.error(msg.includes("not authorised") ? "Email not on the access list. Ask admin to add you." : msg);
+      toast.error(msg.includes("not authorised") ? "Email not on the access list." : msg);
     } finally { setBusy(false); }
   }
 
