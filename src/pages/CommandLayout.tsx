@@ -37,7 +37,9 @@ export default function CommandLayout() {
         </div>
       </section>
 
-      <GriComposer />
+      <section className="mx-auto max-w-7xl px-4 pb-8">
+        <GriComposer />
+      </section>
 
       <SocialStudio />
     </div>
