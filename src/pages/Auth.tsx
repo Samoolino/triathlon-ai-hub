@@ -1,57 +1,52 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { toast } from "@/components/ui/sonner";
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate("/command", { replace: true });
     });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (s) navigate("/command", { replace: true });
+    });
+    return () => sub.subscription.unsubscribe();
   }, [navigate]);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function sendLink(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}/command` },
-        });
-        if (error) throw error;
-        toast.success("Account created. You're in.");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      }
-      navigate("/command", { replace: true });
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { emailRedirectTo: `${window.location.origin}/command`, shouldCreateUser: true },
+      });
+      if (error) throw error;
+      setSent(true);
+      toast.success("Sign-in link sent. Check your inbox.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Auth failed");
-    } finally {
-      setBusy(false);
-    }
+      const msg = err instanceof Error ? err.message : "Failed";
+      toast.error(msg.includes("not authorised") ? "Email not on the access list. Ask admin to add you." : msg);
+    } finally { setBusy(false); }
   }
 
   async function google() {
     setBusy(true);
     try {
-      const r = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: `${window.location.origin}/command`,
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/command` },
       });
-      if (r.error) toast.error(r.error.message ?? "Google sign-in failed");
-      if (!r.redirected && !r.error) navigate("/command", { replace: true });
-    } finally {
-      setBusy(false);
-    }
+      if (error) throw error;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Google sign-in failed");
+    } finally { setBusy(false); }
   }
 
   return (
@@ -59,45 +54,39 @@ export default function AuthPage() {
       <div className="w-full max-w-sm rounded-sm border border-console-line bg-command-surface p-6 shadow-console">
         <div className="mb-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">Agent Tarkwa</p>
-          <h1 className="mt-1 font-display text-2xl text-foreground">Command access</h1>
+          <h1 className="mt-1 font-display text-2xl text-foreground">Allowlisted access</h1>
+          <p className="mt-2 text-xs text-muted-foreground">Enter your authorised email. We'll send a one-time sign-in link — no password.</p>
         </div>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <input
-            type="email"
-            required
-            placeholder="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <input
-            type="password"
-            required
-            minLength={6}
-            placeholder="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            disabled={busy}
-            className="w-full rounded-sm bg-primary px-3 py-2 text-sm font-semibold uppercase tracking-wider text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-          >
-            {busy ? "…" : mode === "signin" ? "Sign in" : "Create account"}
-          </button>
-        </form>
-        <button
-          onClick={google}
-          disabled={busy}
-          className="mt-3 w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
-        >
+
+        {sent ? (
+          <div className="rounded-sm border border-accent/30 bg-accent/5 p-4 text-sm text-foreground">
+            Link sent to <span className="font-mono">{email}</span>. Open it from this device to enter command.
+            <button onClick={() => setSent(false)} className="mt-3 text-xs underline text-muted-foreground">Use a different email</button>
+          </div>
+        ) : (
+          <form onSubmit={sendLink} className="space-y-3">
+            <input
+              type="email" required placeholder="you@authorised.org" value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <button disabled={busy} className="w-full rounded-sm bg-primary px-3 py-2 text-sm font-semibold uppercase tracking-wider text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
+              {busy ? "…" : "Send sign-in link"}
+            </button>
+          </form>
+        )}
+
+        <div className="my-4 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="h-px flex-1 bg-console-line" /> or <div className="h-px flex-1 bg-console-line" />
+        </div>
+
+        <button onClick={google} disabled={busy}
+          className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50">
           Continue with Google
         </button>
-        <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-          <button onClick={() => setMode(mode === "signin" ? "signup" : "signin")} className="underline">
-            {mode === "signin" ? "Need an account?" : "Have an account?"}
-          </button>
-          <Link to="/" className="underline">Back to landing</Link>
+
+        <div className="mt-4 text-center">
+          <Link to="/" className="text-xs underline text-muted-foreground">Back to landing</Link>
         </div>
       </div>
     </div>
