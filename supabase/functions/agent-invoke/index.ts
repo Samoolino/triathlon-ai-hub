@@ -1,44 +1,20 @@
-// Agent Tarkwa — dual-provider AI router (Lovable Gateway primary, OpenAI fallback)
-// Streams chat completions. Persona + master-corpus citations injected server-side.
+// Agent Tarkwa — tri-provider AI router (Lovable Gateway → OpenAI → Gemini fallback)
 import { corsHeaders } from "../_shared/cors.ts";
 
 const LOVABLE_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const PERSONAS: Record<string, { codename: string; mandate: string }> = {
-  "tarkwa-lead": {
-    codename: "Tarkwa — Lead Guardian",
-    mandate:
-      "Coordinate sub-agents. Synthesize cross-domain status. Defend the Uniform Myth narrative. Cite master corpus.",
-  },
-  "bd-strategist": {
-    codename: "BD & Innovation Strategist",
-    mandate:
-      "Curate corporate leads, validate product viability, connect cost/revenue to delivery plans. Reference TRI-X402 BD playbook.",
-  },
-  "comms-liaison": {
-    codename: "Active Comms & Stakeholder Liaison",
-    mandate:
-      "Dispatch invitations, manage civic + corporate clusters, track stage-gates (Drafted → Dispatched → Confirmed).",
-  },
-  "ops-orchestrator": {
-    codename: "Ops Orchestrator",
-    mandate:
-      "Run sprints S0–S8 against the World Triathlon Event Organisers' Manual. Track evidence EV-001..EV-012.",
-  },
-  "esg-controller": {
-    codename: "ESG Controller",
-    mandate:
-      "Enforce GRI 201/204/303/305/306 disclosures on every output. Flag uncited claims.",
-  },
-  "finance-custodian": {
-    codename: "Finance Custodian",
-    mandate:
-      "Govern x402 settlements (daily caps, >0.50 USDC approval). Reconcile funding gaps.",
-  },
+  "tarkwa-lead": { codename: "Tarkwa — Lead Guardian", mandate: "Coordinate sub-agents. Synthesize cross-domain status. Defend the Uniform Myth narrative. Cite master corpus." },
+  "bd-strategist": { codename: "BD & Innovation Strategist", mandate: "Curate corporate leads, validate product viability, connect cost/revenue to delivery plans. Reference TRI-X402 BD playbook." },
+  "comms-liaison": { codename: "Active Comms & Stakeholder Liaison", mandate: "Dispatch invitations, manage civic + corporate clusters, track stage-gates (Drafted → Dispatched → Confirmed). Generate social copy with hashtags." },
+  "ops-orchestrator": { codename: "Ops Orchestrator", mandate: "Run sprints S0–S8 against the World Triathlon Event Organisers' Manual. Track evidence EV-001..EV-012." },
+  "esg-controller": { codename: "ESG Controller", mandate: "Enforce GRI 201/204/303/305/306 disclosures on every output. Flag uncited claims." },
+  "finance-custodian": { codename: "Finance Custodian", mandate: "Govern x402 settlements (daily caps, >0.50 USDC approval). Reconcile funding gaps." },
 };
 
-const CORPUS_CITATIONS = [
+const CORPUS = [
   "TRI-X402 Event Operating System (uploaded)",
   "Agent Tarkwa Command Center Ecosystem (uploaded)",
   "Agent Tarkwa Core Brief (uploaded)",
@@ -52,123 +28,115 @@ function systemPrompt(personaId: string, extra?: string) {
     `You are ${p.codename}, a sub-agent of the Agent Tarkwa Command Center.`,
     `Mandate: ${p.mandate}`,
     "",
-    "AUTHORITATIVE SOURCES (cite by short tag in brackets, e.g. [TRI-X402], [WT-Manual], [GRI-305]):",
-    CORPUS_CITATIONS.map((c, i) => `  ${i + 1}. ${c}`).join("\n"),
+    "AUTHORITATIVE SOURCES (cite by tag like [TRI-X402], [WT-Manual], [GRI-305]):",
+    CORPUS.map((c, i) => `  ${i + 1}. ${c}`).join("\n"),
     "",
     "RULES:",
     "- Every factual claim must include a citation tag. Mark ungrounded claims as [uncited].",
-    "- Be concise and tactical. Use bullet points and tables.",
-    "- Reference sprint codes (S0–S8), evidence IDs (EV-001..EV-012), and persona codenames where relevant.",
-    "- Default event context: invite triathlon (Jabi Lake). The framework is generic — apply same logic to any initiated event.",
+    "- Be concise and tactical. Bullet points / tables welcome.",
+    "- Reference sprint codes (S0–S8), evidence IDs (EV-001..EV-012), persona codenames.",
+    "- Default event context: invite triathlon (Jabi Lake). Framework is generic — apply to any initiated event.",
     extra ?? "",
   ].join("\n");
 }
 
-async function callProvider(
-  provider: "lovable" | "openai",
-  body: Record<string, unknown>,
-  stream: boolean,
-): Promise<Response> {
-  if (provider === "lovable") {
-    const key = Deno.env.get("LOVABLE_API_KEY");
-    if (!key) throw new Error("Missing LOVABLE_API_KEY");
-    return fetch(LOVABLE_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({ ...body, stream }),
-    });
-  }
-  const key = Deno.env.get("OPENAI_API_KEY");
-  if (!key) throw new Error("Missing OPENAI_API_KEY");
-  // Translate model name for direct OpenAI calls
-  const model = String(body.model ?? "").startsWith("openai/")
-    ? String(body.model).replace("openai/", "")
-    : "gpt-4o-mini";
-  return fetch(OPENAI_URL, {
+async function callOpenAICompat(url: string, key: string, body: Record<string, unknown>, stream: boolean) {
+  return fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ ...body, stream }),
+  });
+}
+
+async function callGemini(messages: Array<{ role: string; content: string }>, model: string) {
+  const key = Deno.env.get("GEMINI_API_KEY");
+  if (!key) throw new Error("Missing GEMINI_API_KEY");
+  const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
+  const contents = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+  const resp = await fetch(`${GEMINI_BASE}/${model}:generateContent?key=${key}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: systemMsg ? { parts: [{ text: systemMsg }] } : undefined,
+      contents,
+      generationConfig: { temperature: 0.4 },
+    }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Gemini ${resp.status}: ${txt}`);
+  }
+  const data = await resp.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
+  return text;
+}
+
+function geminiToSSE(text: string) {
+  const encoder = new TextEncoder();
+  const chunks = [
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: text } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+    `data: [DONE]\n\n`,
+  ];
+  return new ReadableStream({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
     },
-    body: JSON.stringify({ ...body, model, stream }),
   });
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const {
-      messages = [],
-      persona = "tarkwa-lead",
-      provider = "lovable",
-      model,
-      stream = true,
-      extraSystem,
-    } = await req.json();
-
+    const { messages = [], persona = "tarkwa-lead", model, stream = true, extraSystem } = await req.json();
     if (!Array.isArray(messages) || messages.length === 0) {
-      return new Response(JSON.stringify({ error: "messages required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "messages required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const finalModel =
-      model ??
-      (provider === "openai" ? "openai/gpt-4o-mini" : "google/gemini-3-flash-preview");
+    const fullMessages = [{ role: "system", content: systemPrompt(persona, extraSystem) }, ...messages];
+    const body = { model: model ?? "google/gemini-3-flash-preview", messages: fullMessages, temperature: 0.4 };
 
-    const body = {
-      model: finalModel,
-      messages: [
-        { role: "system", content: systemPrompt(persona, extraSystem) },
-        ...messages,
-      ],
-      temperature: 0.4,
-    };
-
-    // Primary attempt
-    let resp = await callProvider(provider as "lovable" | "openai", body, stream);
-
-    // Auto-fallback Lovable -> OpenAI on 402/429
-    if (provider === "lovable" && (resp.status === 402 || resp.status === 429)) {
-      if (Deno.env.get("OPENAI_API_KEY")) {
-        resp = await callProvider("openai", { ...body, model: "openai/gpt-4o-mini" }, stream);
+    // 1. Lovable Gateway
+    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    let resp: Response | null = null;
+    if (lovableKey) {
+      resp = await callOpenAICompat(LOVABLE_URL, lovableKey, body, stream);
+      if (resp.ok) {
+        return new Response(stream ? resp.body : JSON.stringify(await resp.json()), {
+          headers: { ...corsHeaders, "Content-Type": stream ? "text/event-stream" : "application/json", "Cache-Control": "no-cache" },
+        });
       }
+      console.warn("[agent-invoke] Lovable failed", resp.status);
     }
 
-    if (!resp.ok) {
-      const txt = await resp.text();
-      return new Response(JSON.stringify({ error: txt, status: resp.status }), {
-        status: resp.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // 2. OpenAI fallback
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    if (openaiKey) {
+      const r = await callOpenAICompat(OPENAI_URL, openaiKey, { ...body, model: "gpt-4o-mini" }, stream);
+      if (r.ok) {
+        return new Response(stream ? r.body : JSON.stringify(await r.json()), {
+          headers: { ...corsHeaders, "Content-Type": stream ? "text/event-stream" : "application/json", "Cache-Control": "no-cache" },
+        });
+      }
+      console.warn("[agent-invoke] OpenAI failed", r.status);
+    }
+
+    // 3. Gemini direct fallback (non-streaming, wrapped as SSE if needed)
+    const text = await callGemini(fullMessages, "gemini-2.5-flash");
+    if (stream) {
+      return new Response(geminiToSSE(text), {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
       });
     }
-
-    if (!stream) {
-      const data = await resp.json();
-      return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Stream SSE straight through
-    return new Response(resp.body, {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+    return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: text } }] }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
