@@ -1,71 +1,89 @@
-## Agent Tarkwa — Access, Gemini Fallback, GRI Enrichment, Social Force
+## Agent Tarkwa — Auth swap, dashboard wipe, multi-CEX trade engine
 
-Scope: evolve the existing Command Center. Keep current routes, schemas, and personas. No rewrites.
+### 1. Authentication — email/password + Google, allowlist kept
 
----
+- Replace the magic-link only `/auth` page with a two-tab form: **Sign in** (email + password) and **Sign up** (email + password + display name). Keep a **Continue with Google** button using `lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin })`.
+- Keep the `allowed_emails` allowlist as the gate. The existing `handle_new_user` trigger already rejects un-allowlisted signups; pre-check on the client for friendly UX before calling `signUp`. Google sign-ins are checked client-side post-auth and signed out + toasted if not allowed.
+- Add a `/reset-password` page calling `supabase.auth.updateUser({ password })` and a "Forgot password" link wired to `supabase.auth.resetPasswordForEmail(email, { redirectTo: origin + '/reset-password' })`.
+- Enable Lovable-managed Google provider via `configure_social_auth`; keep email provider on; do **not** disable signups (allowlist trigger is the gate).
+- Admin allowlist UI on `/admin` already exists — unchanged.
 
-### 1. Passwordless allowlist access
+### 2. Dashboard wipe & "review-then-repopulate" loop
 
-- Add `allowed_emails` table: `email citext primary key, invited_by uuid, role app_role default 'viewer', note text, created_at`. Admin-only insert/update/delete; `select` allowed to authenticated.
-- Trigger on `auth.users` insert: if `lower(email)` not in `allowed_emails` and not `esgsportrive@gmail.com`, raise an exception so signup fails cleanly.
-- Update `handle_new_user` to read the allowlist row and apply its `role` (fallback `viewer`).
-- Auth page `/auth` becomes magic-link only (email field + "Send sign-in link"). Calls `supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: /command, shouldCreateUser: true } })`. Password UI removed. Google button kept but post-sign-in we check allowlist client-side and `signOut()` + toast if not allowed (defence-in-depth; trigger is the source of truth).
-- Admin page gains an **Access list** panel: add email + role, list, revoke. Wired to `allowed_emails`.
+Across `CommandCenter`, `ExecutiveCommand`, `BusinessDevelopment`, `GriAnalytics`, `GriProductMatrix`:
 
-### 2. Gemini API key as fallback
+- Strip hard-coded budget / prize-money / capacity figures. Render each KPI tile as a **"Awaiting agent intake"** placeholder when the new `operational_figures` table has no current row.
+- New table `operational_figures (event_code, key, value numeric, unit, source_agent, requested_at, captured_at, status: pending|captured|stale, citation jsonb)`. RLS: editors/admins write, viewers read.
+- On mount of each board, if any required key is missing, dispatch a row into `agent_requests` (kind `figure-intake`) addressed to the owning department (Finance Custodian for budget, BD Accomplice for sponsorship, Ops Orchestrator for capacity, ESG Controller for emissions). The Lead Guardian broadcast in `deriveComms` calls the wipe out as "passive observation — figures cleared, intake dispatched."
+- `AgentChat` persona `finance-custodian` gets a tool `record_operational_figure({ event_code, key, value, unit, citation })` (server-side via `agent-invoke` tool-call handling) that upserts into `operational_figures` and marks the matching `agent_requests` row `fulfilled`.
 
-- Store the pasted key as secret `GEMINI_API_KEY` (Google AI Studio key, format `AQ.…`).
-- Extend `supabase/functions/agent-invoke/index.ts`: existing Lovable→OpenAI fallback chain extended to a 3-tier ladder — Lovable Gateway → OpenAI (if `OPENAI_API_KEY`) → Google Generative Language API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key=GEMINI_API_KEY`) using `gemini-2.5-flash`. Translates OpenAI-style messages → Gemini `contents` and streams back as SSE chunks shaped like OpenAI deltas so the client stays unchanged.
-- New `supabase/functions/media-generate/index.ts`: takes `{ kind: "image"|"video", prompt, aspect_ratio }`. Image → Gemini `imagen-3.0-generate` (or `imagegen-3` fallback) via Generative Language API with the same key; returns base64 PNG and uploads to a new public storage bucket `social-media`. Video → returns 202 + queued row (Veo access often gated); persisted in `media_jobs` so we can swap in Veo when accessible.
+### 3. Multi-CEX spot trading + websocket scanner
 
-### 3. GRI report engine
+#### 3.1 Exchanges & secrets
 
-- New table `gri_disclosures`: `event_code, gri_code (e.g. GRI-305-1), status (draft|in-progress|terminal), disclosure_type (full|nda), value jsonb, narrative text, citations text[], updated_by, updated_at`. RLS: editors+admins write, viewers read.
-- New `gri_external_facts` cache table: `key, source (sheet|web|corpus), payload jsonb, fetched_at` so repeat lookups are cheap.
-- New edge function `gri-compose`: pipeline = (a) pull rows from `events_log` for the event, (b) don't read the official Sheet (`1txzB76DTcWI03ddIOPdSLuD62FFN56ORHiyVyIwWzQE`) yet via the Google Sheets connector gateway, (c) optional web search for emission factors / water tariffs (only when value missing), (d) ask the model to emit per-GRI-code JSON keyed by `GRI-201-1`, `GRI-204-1`, `GRI-303-3/5`, `GRI-305-1/2/3`, `GRI-306-3`, each with `{ value, unit, method, citations[], nda: bool, status }`. Upsert into `gri_disclosures`.
-- `GriAnalytics` page gets a "Compose disclosures" button + status badges (Draft / In-progress / Terminal) and NDA chips.
-- User action required during build: don't link the **Google Sheets** connector yet(workspace-owner OAuth) so the function can not read the master sheet.
+- Targets: **MEXC, LBank, Bybit, Phemex, HTX, Bitunix Pro**. Each needs a key+secret pair stored as runtime secrets (`MEXC_API_KEY` / `MEXC_API_SECRET`, etc.) — requested via `add_secret` once the user approves this plan. Trading scope required.
+- Public order-book websockets (no key) are used for the scanner; private REST/WS endpoints are used for order placement.
 
-### 4. Social media force (human-in-the-loop OAuth)
+#### 3.2 Tables
 
-- New tables:
-  - `social_accounts`: `id, event_code (nullable = workspace-wide), platform (x|instagram|linkedin|facebook|tiktok|youtube), handle, status (requested|pending_oauth|connected|revoked), connection_id (nullable), requested_by, created_at`.
-  - `social_posts`: `id, event_code, account_id, kind (image|video|text), prompt, generated_media_url, caption, scheduled_at, status (draft|scheduled|posted|failed), approval_state, created_by`.
-  - `agent_requests`: `id, kind (oauth-link|account-create|approval), payload jsonb, status (open|fulfilled|dismissed), assignee_email, created_at` — generic human-loop inbox.
-- New page `/command/social`:
-  - **Accounts** tab: per-platform cards. When agent needs an account it inserts an `agent_requests` row of kind `account-create`; the card surfaces a "Connect &nbsp;" CTA that opens the platform's official signup, then a "Mark connected & link OAuth" flow that links the matching connector (X, LinkedIn, Instagram Graph, etc.) via `standard_connectors--connect` at build time. At runtime, posting uses connector gateway URLs.
-  - **Content studio**: form (event, platform set, brief). Calls `media-generate` for image/video and `agent-invoke` (persona `comms-liaison`) for caption + hashtags. Preview grid, edit, then "Schedule" → row in `social_posts`.
-  - **Schedule board**: timeline view grouped by event + platform.
-- New edge function `social-publish` (cron every 5 min via pg_cron): pulls due `social_posts`, posts via the linked connector gateway, writes back `status` + remote URL. Failures move to `agent_requests` as `approval` items.
-- Per-event flow: when a mission's "initiation" stage fires (existing `events_log` event), `narrative-synth` creates one `agent_requests` row per platform asking the human operator to authorise the event's dedicated sub-account.
+- `cex_accounts (exchange, label, status, daily_cap_usdc, hard_stop_pct)`
+- `trade_universe (symbol, base, quote, exchanges text[], esg_tag, enabled)` — populated from a startup job that intersects each exchange's symbol list and tags ones whose project metadata contains ESG keywords (carbon, climate, renew, regen, green, water, impact). Tokens with no ESG affinity are still tradable but flagged `esg_tag = null`.
+- `trade_intents (id, source_event_code, source_task_id, allocated_usdc, symbol, buy_exchange, sell_exchange, expected_spread_bps, status: queued|executing|filled|aborted|breakeven_hold, created_at)`
+- `trade_fills (intent_id, side, exchange, price, qty, fee_usdc, ts, remote_order_id)`
+- `trade_positions (symbol, exchange, qty, entry_price, entry_fees_usdc, current_floor)` — enforces hard-stop: never close below `entry_price + fees_per_unit`; trailing floor ratchets up.
+- `trade_pnl_daily (date, realised_usdc, unrealised_usdc, allocated_usdc, status: green|halt)` — when `realised_usdc < 0` after a fill, scanner halts new buys for the day.
+- `orderbook_snapshots (symbol, exchange, bid, ask, ts)` — rolling 5-min window, used by spread scanner.
 
-### 5. Frontend wiring
+#### 3.3 Edge functions
 
-- `useAuth.ts`: add `roles` already present; expose `allowedEmails` query for admins.
-- `AgentChat.tsx`: unchanged contract, will transparently benefit from Gemini fallback.
-- New `src/lib/social-platforms.ts` and `src/lib/gri-codes.ts` for the typed code tables used in UI.
-- New components: `AllowlistManager`, `SocialAccountCard`, `ContentStudio`, `ScheduleBoard`, `GriDisclosureTable`.
+- `cex-ws-scanner` (Deno, long-running via `Deno.serve` + scheduled `keep-alive` cron every 4 min): opens public depth WS per exchange, writes top-of-book to `orderbook_snapshots`, emits Postgres `NOTIFY arb_signal` when cross-exchange spread > 25 bps (configurable).
+- `trade-execute`: invoked by NOTIFY listener + by `task-completion` hook. Inputs `{ intent_id }`. Pulls latest book, places limit-buy on cheap venue + limit-sell on rich venue via the exchange's signed REST (per-exchange adapter modules: `mexc.ts`, `lbank.ts`, `bybit.ts`, `phemex.ts`, `htx.ts`, `bitunix.ts`). Writes `trade_fills`. Refuses if `trade_pnl_daily.status = halt` or if sell price would break the hard-stop floor (then sets intent `breakeven_hold`).
+- `task-completion-hook`: triggered from the existing event-engine when a `tasks` row flips to `completed`. Allocates a fixed USDC budget keyed off `taskClass` (lookup table `task_trade_budget`), picks current top spread from `orderbook_snapshots`, inserts a `trade_intents` row, then invokes `trade-execute` if `pnl_daily ≥ 0` and `spread > threshold`. Otherwise the intent stays `queued` for human review in `agent_requests`.
+- `position-floor-keeper` (cron every 1 min): ratchets `current_floor` upward as price rises so positions never close below entry+fees.
 
-### 6. Security & memory
+#### 3.4 Frontend
 
-- `GEMINI_API_KEY` stored as backend secret, never sent to client.
-- Magic-link auth — disable email/password sign-ups in `configure_auth` (`disable_signup: true` is too strict; instead we rely on the allowlist trigger so signup is open at API but rejected when email not pre-approved).
-- Save memory: "Access is allowlist-driven via `allowed_emails`; admin `esgsportrive@gmail.com` manages access from /admin."
+- New `/command/trading` route with three panels:
+  1. **Live spreads** — top-of-book grid per symbol across the six venues (streamed via Supabase Realtime on `orderbook_snapshots`).
+  2. **Intents & fills** — table of `trade_intents` with status badges, originating task chip, allocated USDC, PnL.
+  3. **Positions & PnL** — open positions, floor vs market, day PnL bar, halt indicator.
+- Comm stream (`deriveComms`) gains synthesized "Finance Custodian → Guardian" lines when trades fill or get held at break-even.
+- Wallet panel (`executive-workforce.ts` `WalletState`) now sources `balanceUSDC` from aggregated CEX balances (per-exchange `/account` poll every 30 s).
 
----
+#### 3.5 Guardrails
 
-### Sequencing during build
+- Per-task allocation capped by `cex_accounts.daily_cap_usdc`.
+- `consecutive402` analogue: two consecutive failed fills on the same symbol/venue blacklist that pair for 15 min.
+- Hard-stop enforced server-side in `trade-execute`, not just UI.
+- All exchange secrets server-only; client only sees aggregated state.
 
-1. Migration: `allowed_emails`, `gri_disclosures`, `gri_external_facts`, `social_accounts`, `social_posts`, `agent_requests`, `media_jobs`, storage bucket `social-media`, signup trigger.
-2. Add `GEMINI_API_KEY` secret (secure form).
-3. Extend `agent-invoke` with Gemini fallback; create `media-generate`, `gri-compose`, `social-publish`.
-4. Rebuild `/auth` to magic-link only; add `AllowlistManager` to `/admin`.
-5. Add `/command/social` and GRI compose button on `/command/gri`.
-6. don't Link Google Sheets connector; surface "don't Connect " CTAs that link the relevant connectors when the user is ready.
-7. Schedule `social-publish` cron via `pg_cron` + `pg_net`.
+### 4. x402 funding link
 
-### Out of scope
+`executeX402` in `executive-workforce.ts` already gates spend; extend so that when a payment settles, the Finance Custodian queues a matching `trade_intents` row sized to recover the spend (so x402 outflow is offset by spot opportunity). Same hard-stop applies.
 
-- Building bespoke OAuth flows for platforms without an existing Lovable connector (we surface a human-loop request instead).
-- Real Veo video rendering until access is confirmed — stub returns a queued job.
-- On-chain x402 settlement (still simulated).
+### 5. Out of scope (this iteration)
+
+- Margin, futures, perp funding-rate arbitrage.
+- On-chain DEX trading.
+- Tax accounting export.
+- Building bespoke OAuth flows for any exchange that doesn't expose a public WS.
+
+### Sequencing
+
+1. Migration: drop hard-coded figure seeds; add `operational_figures`, `cex_accounts`, `trade_universe`, `trade_intents`, `trade_fills`, `trade_positions`, `trade_pnl_daily`, `orderbook_snapshots`, `task_trade_budget`. GRANT + RLS for each.
+2. Auth rebuild: `/auth` (tabs), `/reset-password`, `configure_social_auth(['google'])`.
+3. Request CEX secrets via `add_secret` (12 secrets total).
+4. Edge functions: per-exchange adapters, `cex-ws-scanner`, `trade-execute`, `task-completion-hook`, `position-floor-keeper`.
+5. Frontend: wipe figure placeholders, add `/command/trading`, wire Realtime channels, add comm stream entries.
+6. pg_cron schedules: scanner keep-alive (4 min), floor keeper (1 min), balance poll (30 s via edge function self-invoke).
+
+### User actions required after approval
+
+- Paste API key+secret pairs for each of the six exchanges into the secure form when prompted.
+- Confirm initial per-exchange `daily_cap_usdc` and the spread threshold (default 25 bps) on the new `/command/trading` settings panel.                     
+
+Ensure our activies are reflecting in the ESG reports 
+
+&nbsp;
+
+allow a live audit report  trails

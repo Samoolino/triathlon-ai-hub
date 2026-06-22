@@ -107,6 +107,72 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_trail: {
+        Row: {
+          action: string
+          actor: string
+          actor_type: string
+          id: number
+          payload: Json | null
+          subject: string | null
+          ts: string
+        }
+        Insert: {
+          action: string
+          actor: string
+          actor_type?: string
+          id?: number
+          payload?: Json | null
+          subject?: string | null
+          ts?: string
+        }
+        Update: {
+          action?: string
+          actor?: string
+          actor_type?: string
+          id?: number
+          payload?: Json | null
+          subject?: string | null
+          ts?: string
+        }
+        Relationships: []
+      }
+      cex_accounts: {
+        Row: {
+          created_at: string
+          daily_cap_usdc: number
+          exchange: string
+          hard_stop_pct: number
+          id: string
+          label: string | null
+          spread_threshold_bps: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          daily_cap_usdc?: number
+          exchange: string
+          hard_stop_pct?: number
+          id?: string
+          label?: string | null
+          spread_threshold_bps?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          daily_cap_usdc?: number
+          exchange?: string
+          hard_stop_pct?: number
+          id?: string
+          label?: string | null
+          spread_threshold_bps?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       events_log: {
         Row: {
           created_at: string
@@ -269,6 +335,75 @@ export type Database = {
         }
         Relationships: []
       }
+      operational_figures: {
+        Row: {
+          captured_at: string | null
+          citation: Json | null
+          event_code: string | null
+          id: string
+          key: string
+          requested_at: string
+          source_agent: string | null
+          status: string
+          unit: string | null
+          updated_at: string
+          value: number | null
+        }
+        Insert: {
+          captured_at?: string | null
+          citation?: Json | null
+          event_code?: string | null
+          id?: string
+          key: string
+          requested_at?: string
+          source_agent?: string | null
+          status?: string
+          unit?: string | null
+          updated_at?: string
+          value?: number | null
+        }
+        Update: {
+          captured_at?: string | null
+          citation?: Json | null
+          event_code?: string | null
+          id?: string
+          key?: string
+          requested_at?: string
+          source_agent?: string | null
+          status?: string
+          unit?: string | null
+          updated_at?: string
+          value?: number | null
+        }
+        Relationships: []
+      }
+      orderbook_snapshots: {
+        Row: {
+          ask: number
+          bid: number
+          exchange: string
+          id: number
+          symbol: string
+          ts: string
+        }
+        Insert: {
+          ask: number
+          bid: number
+          exchange: string
+          id?: number
+          symbol: string
+          ts?: string
+        }
+        Update: {
+          ask?: number
+          bid?: number
+          exchange?: string
+          id?: number
+          symbol?: string
+          ts?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -387,6 +522,209 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      task_trade_budget: {
+        Row: {
+          task_class: string
+          updated_at: string
+          usdc_per_completion: number
+        }
+        Insert: {
+          task_class: string
+          updated_at?: string
+          usdc_per_completion?: number
+        }
+        Update: {
+          task_class?: string
+          updated_at?: string
+          usdc_per_completion?: number
+        }
+        Relationships: []
+      }
+      trade_fills: {
+        Row: {
+          exchange: string
+          fee_usdc: number
+          id: string
+          intent_id: string | null
+          price: number
+          qty: number
+          remote_order_id: string | null
+          side: string
+          symbol: string
+          ts: string
+        }
+        Insert: {
+          exchange: string
+          fee_usdc?: number
+          id?: string
+          intent_id?: string | null
+          price: number
+          qty: number
+          remote_order_id?: string | null
+          side: string
+          symbol: string
+          ts?: string
+        }
+        Update: {
+          exchange?: string
+          fee_usdc?: number
+          id?: string
+          intent_id?: string | null
+          price?: number
+          qty?: number
+          remote_order_id?: string | null
+          side?: string
+          symbol?: string
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_fills_intent_id_fkey"
+            columns: ["intent_id"]
+            isOneToOne: false
+            referencedRelation: "trade_intents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_intents: {
+        Row: {
+          allocated_usdc: number
+          buy_exchange: string | null
+          created_at: string
+          expected_spread_bps: number | null
+          id: string
+          note: string | null
+          sell_exchange: string | null
+          source_event_code: string | null
+          source_task_id: string | null
+          status: string
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          allocated_usdc: number
+          buy_exchange?: string | null
+          created_at?: string
+          expected_spread_bps?: number | null
+          id?: string
+          note?: string | null
+          sell_exchange?: string | null
+          source_event_code?: string | null
+          source_task_id?: string | null
+          status?: string
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          allocated_usdc?: number
+          buy_exchange?: string | null
+          created_at?: string
+          expected_spread_bps?: number | null
+          id?: string
+          note?: string | null
+          sell_exchange?: string | null
+          source_event_code?: string | null
+          source_task_id?: string | null
+          status?: string
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      trade_pnl_daily: {
+        Row: {
+          allocated_usdc: number
+          date: string
+          realised_usdc: number
+          status: string
+          unrealised_usdc: number
+          updated_at: string
+        }
+        Insert: {
+          allocated_usdc?: number
+          date?: string
+          realised_usdc?: number
+          status?: string
+          unrealised_usdc?: number
+          updated_at?: string
+        }
+        Update: {
+          allocated_usdc?: number
+          date?: string
+          realised_usdc?: number
+          status?: string
+          unrealised_usdc?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      trade_positions: {
+        Row: {
+          current_floor: number
+          entry_fees_usdc: number
+          entry_price: number
+          exchange: string
+          id: string
+          qty: number
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          current_floor?: number
+          entry_fees_usdc?: number
+          entry_price?: number
+          exchange: string
+          id?: string
+          qty?: number
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          current_floor?: number
+          entry_fees_usdc?: number
+          entry_price?: number
+          exchange?: string
+          id?: string
+          qty?: number
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      trade_universe: {
+        Row: {
+          base: string
+          created_at: string
+          enabled: boolean
+          esg_tag: string | null
+          exchanges: string[]
+          id: string
+          quote: string
+          symbol: string
+        }
+        Insert: {
+          base: string
+          created_at?: string
+          enabled?: boolean
+          esg_tag?: string | null
+          exchanges?: string[]
+          id?: string
+          quote?: string
+          symbol: string
+        }
+        Update: {
+          base?: string
+          created_at?: string
+          enabled?: boolean
+          esg_tag?: string | null
+          exchanges?: string[]
+          id?: string
+          quote?: string
+          symbol?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {
