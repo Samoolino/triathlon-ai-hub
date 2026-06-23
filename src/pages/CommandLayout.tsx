@@ -7,6 +7,7 @@ import NarrativeFeed from "@/components/NarrativeFeed";
 import GriComposer from "@/components/GriComposer";
 import TradingConsole from "@/components/TradingConsole";
 import OperationalFigures from "@/components/OperationalFigures";
+import SocialStudio from "@/components/SocialStudio";
 
 export default function CommandLayout() {
   const { user, isAdmin, signOut } = useAuth();
