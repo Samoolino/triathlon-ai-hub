@@ -33,6 +33,12 @@ export default function CommandLayout() {
       <Index />
 
       <section className="mx-auto max-w-7xl px-4 pb-8">
+        <OperationalFigures />
+      </section>
+
+      <TradingConsole />
+
+      <section className="mx-auto max-w-7xl px-4 pb-8">
         <div className="grid gap-4 lg:grid-cols-2">
           <NarrativeFeed />
           <AgentChat />
