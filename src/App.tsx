@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Landing from "./pages/Landing";
 import AuthPage from "./pages/Auth";
+import ResetPasswordPage from "./pages/ResetPassword";
 import Blueprint from "./pages/Blueprint";
 import CommandLayout from "./pages/CommandLayout";
 import Admin from "./pages/Admin";
