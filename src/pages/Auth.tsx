@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable";
 import { toast } from "@/components/ui/sonner";
+
+type Mode = "signin" | "signup" | "forgot";
 
 export default function AuthPage() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -19,42 +24,62 @@ export default function AuthPage() {
     return () => sub.subscription.unsubscribe();
   }, [navigate]);
 
-  async function sendLink(e: React.FormEvent) {
+  async function checkAllowed(target: string) {
+    if (target === "esgsportrive@gmail.com") return true;
+    const { data } = await supabase.from("allowed_emails").select("email").eq("email", target).maybeSingle();
+    return Boolean(data);
+  }
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
       const target = email.trim().toLowerCase();
-      // Pre-check allowlist for friendly UX (trigger is source of truth)
-      const { data: allow } = await supabase.from("allowed_emails").select("email").eq("email", target).maybeSingle();
-      if (!allow && target !== "esgsportrive@gmail.com") {
-        toast.error("Email not on the access list. Ask the admin to add you.");
-        setBusy(false);
+      if (mode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(target, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (error) throw error;
+        toast.success("Reset link sent. Check your inbox.");
+        setMode("signin");
         return;
       }
-      const { error } = await supabase.auth.signInWithOtp({
-        email: target,
-        options: { emailRedirectTo: `${window.location.origin}/command`, shouldCreateUser: true },
-      });
-      if (error) throw error;
-      setSent(true);
-      toast.success("Sign-in link sent. Check your inbox.");
+      if (!(await checkAllowed(target))) {
+        toast.error("Email not on the access list. Ask the admin to add you.");
+        return;
+      }
+      if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email: target,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/command`,
+            data: { display_name: displayName || target.split("@")[0] },
+          },
+        });
+        if (error) throw error;
+        toast.success("Account created. Check your inbox to confirm if required.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: target, password });
+        if (error) throw error;
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed";
-      toast.error(msg.includes("not authorised") ? "Email not on the access list." : msg);
-    } finally { setBusy(false); }
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function google() {
     setBusy(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: `${window.location.origin}/command` },
-      });
-      if (error) throw error;
+      const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: `${window.location.origin}/command` });
+      if (result.error) throw result.error;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Google sign-in failed");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -62,27 +87,56 @@ export default function AuthPage() {
       <div className="w-full max-w-sm rounded-sm border border-console-line bg-command-surface p-6 shadow-console">
         <div className="mb-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">Agent Tarkwa</p>
-          <h1 className="mt-1 font-display text-2xl text-foreground">Allowlisted access</h1>
-          <p className="mt-2 text-xs text-muted-foreground">Enter your authorised email. We'll send a one-time sign-in link — no password.</p>
+          <h1 className="mt-1 font-display text-2xl text-foreground">
+            {mode === "signup" ? "Create access" : mode === "forgot" ? "Reset password" : "Operator sign-in"}
+          </h1>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Allowlisted access. Admin authorises new emails from <span className="font-mono">/admin</span>.
+          </p>
         </div>
 
-        {sent ? (
-          <div className="rounded-sm border border-accent/30 bg-accent/5 p-4 text-sm text-foreground">
-            Link sent to <span className="font-mono">{email}</span>. Open it from this device to enter command.
-            <button onClick={() => setSent(false)} className="mt-3 text-xs underline text-muted-foreground">Use a different email</button>
-          </div>
-        ) : (
-          <form onSubmit={sendLink} className="space-y-3">
+        <div className="mb-4 flex gap-1 rounded-sm border border-console-line bg-console-sunken p-1 text-[10px] uppercase tracking-wider">
+          {(["signin", "signup"] as Mode[]).map((m) => (
+            <button key={m} onClick={() => setMode(m)} className={`flex-1 rounded-sm px-2 py-1.5 transition ${mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+              {m === "signin" ? "Sign in" : "Sign up"}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            type="email" required placeholder="you@authorised.org" value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {mode === "signup" && (
             <input
-              type="email" required placeholder="you@authorised.org" value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text" placeholder="Display name (optional)" value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
               className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
-            <button disabled={busy} className="w-full rounded-sm bg-primary px-3 py-2 text-sm font-semibold uppercase tracking-wider text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
-              {busy ? "…" : "Send sign-in link"}
+          )}
+          {mode !== "forgot" && (
+            <input
+              type="password" required minLength={8} placeholder="Password (8+ chars)" value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-sm border border-console-line bg-console-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          )}
+          <button disabled={busy} className="w-full rounded-sm bg-primary px-3 py-2 text-sm font-semibold uppercase tracking-wider text-primary-foreground transition hover:opacity-90 disabled:opacity-50">
+            {busy ? "…" : mode === "signup" ? "Create account" : mode === "forgot" ? "Send reset link" : "Sign in"}
+          </button>
+          {mode === "signin" && (
+            <button type="button" onClick={() => setMode("forgot")} className="block w-full text-center text-xs text-muted-foreground underline">
+              Forgot password?
             </button>
-          </form>
-        )}
+          )}
+          {mode === "forgot" && (
+            <button type="button" onClick={() => setMode("signin")} className="block w-full text-center text-xs text-muted-foreground underline">
+              Back to sign in
+            </button>
+          )}
+        </form>
 
         <div className="my-4 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
           <div className="h-px flex-1 bg-console-line" /> or <div className="h-px flex-1 bg-console-line" />
