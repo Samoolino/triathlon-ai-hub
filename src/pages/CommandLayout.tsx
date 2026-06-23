@@ -4,8 +4,9 @@ import { useAuth } from "@/hooks/useAuth";
 import Index from "./Index";
 import AgentChat from "@/components/AgentChat";
 import NarrativeFeed from "@/components/NarrativeFeed";
-import SocialStudio from "@/components/SocialStudio";
 import GriComposer from "@/components/GriComposer";
+import TradingConsole from "@/components/TradingConsole";
+import OperationalFigures from "@/components/OperationalFigures";
 
 export default function CommandLayout() {
   const { user, isAdmin, signOut } = useAuth();
