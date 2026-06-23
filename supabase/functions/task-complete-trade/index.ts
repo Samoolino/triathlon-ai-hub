@@ -67,8 +67,7 @@ Deno.serve(async (req) => {
       const realised = (best.bid - best.ask) * qty - fee;
       // never below entry+fees: clamp at 0 if would be negative
       const safe = Math.max(0, realised);
-      await sb.from("trade_intents").update({ status: "filled", note: live ? "live" : "paper" }).eq("id", intent!.id);
-      await sb.rpc("ignore_missing");// noop guard
+      await sb.from("trade_intents").update({ status: "filled", note: "paper" }).eq("id", intent!.id);
       const next = (pnl?.realised_usdc ?? 0) + safe;
       await sb.from("trade_pnl_daily").upsert({ date: today, realised_usdc: next, allocated_usdc: (pnl?.allocated_usdc ?? 0) + alloc, status: next < 0 ? "halt" : "green" });
       await sb.from("audit_trail").insert({ actor: "task-complete-trade", action: "paper-fill", subject: intent!.id, payload: { realised: safe, spread_bps: best.bps } });
